@@ -83,7 +83,7 @@ void main() {
 
     test('audio-bound effect clips are re-anchored on every edit', () {
       final composition = withClips([effectClip('e', start: s(2), sourceIn: ms(500), audioOrigin: Duration.zero)])
-          .setAudio(AudioRef(path: 'song.mp3', offset: ms(250)));
+          .setAudio(AudioTrack.single(path: 'song.mp3', offset: ms(250)));
       expect(refOf(composition, 'e').audioOrigin, s(2) - ms(500) - ms(250));
       final moved = composition.moveClip('e', s(4));
       expect(refOf(moved, 'e').audioOrigin, s(4) - ms(500) - ms(250));

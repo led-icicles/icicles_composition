@@ -1,13 +1,14 @@
 import 'package:icicles_animation_dart/icicles_animation_dart.dart';
 import 'package:icicles_generators/icicles_generators.dart';
 
-import '../model/audio_ref.dart';
+import '../model/audio_track.dart';
 import '../model/clip.dart';
 import '../model/clip_label.dart';
 import '../model/composition.dart';
 import '../model/loop_range.dart';
 import '../model/macro_def.dart';
 import '../model/marker.dart';
+import '../model/output_spec.dart';
 import '../model/region.dart';
 import '../model/source_ref.dart';
 import '../model/transition.dart';
@@ -19,11 +20,16 @@ import 'source_info.dart';
 /// The edge of a clip being dragged.
 enum ClipEdge { start, end }
 
+/// The edge of an audio segment being trimmed.
+enum AudioEdge { start, end }
+
 /// Song time at generator (or effect) time 0 of [clip] in [composition]:
-/// `clip.start − clip.sourceIn − audio.offset` (offset 0 without a
+/// `clip.start − clip.sourceIn − offset`, where `offset` is the mapping of
+/// the audio segment at the clip start ([AudioTrack.offsetAt]: the segment
+/// playing there, else the preceding one, else the first; 0 without a
 /// soundtrack). What [ParametricRef.audioOrigin] holds when it is set.
 Duration audioOriginFor(Composition composition, Clip clip) =>
-    clip.start - clip.sourceIn - (composition.audio?.offset ?? Duration.zero);
+    clip.start - clip.sourceIn - (composition.audio?.offsetAt(clip.start) ?? Duration.zero);
 
 /// [composition] with every audio-bound generator or effect clip (a
 /// [ParametricRef] whose `audioOrigin` is not `null`) re-anchored to
@@ -734,14 +740,193 @@ extension CompositionEdits on Composition {
   }
 
   /// Sets or (with `null`) removes the music track; audio-bound generator
-  /// clips are re-anchored to the new offset (0 without a soundtrack).
-  Composition setAudio(AudioRef? audio) =>
+  /// clips are re-anchored to the new mapping (0 without a soundtrack).
+  Composition setAudio(AudioTrack? audio) =>
       reanchorGeneratorClips(audio == null ? copyWith(removeAudio: true) : copyWith(audio: audio));
+
+  /// Moves every audio segment together so that the first one's
+  /// [AudioSegment.offset] becomes [offset] (a negative offset skips the
+  /// beginning of the file: the first segment's `sourceIn` grows instead and
+  /// the following segments keep their distance to it, clamped at the
+  /// timeline start). [CompositionErrorKind.invalidValue] without a
+  /// soundtrack.
+  Composition setAudioOffset(Duration offset) {
+    final audio = _audio();
+    final first = audio.first;
+    final shift = offset - first.offset;
+    final segments = <AudioSegment>[];
+    for (final segment in audio.segments) {
+      var start = segment.start + shift;
+      var sourceIn = segment.sourceIn;
+      final sourceOut = segment.sourceOut;
+      if (start.isNegative) {
+        // The part before the timeline start is skipped.
+        sourceIn -= start;
+        start = Duration.zero;
+        if (sourceOut != null && sourceOut - sourceIn < AudioSegment.minDuration) continue;
+      }
+      segments.add(segment.copyWith(start: start, sourceIn: sourceIn));
+    }
+    if (segments.isEmpty) {
+      throw const CompositionException(CompositionErrorKind.invalidValue, 'Every audio segment would fall before 0.');
+    }
+    return setAudio(_guard(() => audio.copyWith(segments: segments)));
+  }
+
+  /// Sets the soundtrack volume (clamped to `[0, AudioTrack.maxGain]`);
+  /// [CompositionErrorKind.invalidValue] without a soundtrack.
+  Composition setAudioGain(double gain) {
+    final audio = _audio();
+    if (!gain.isFinite) throw CompositionException(CompositionErrorKind.invalidValue, 'Gain $gain is not finite.');
+    return copyWith(audio: audio.copyWith(gain: gain.clamp(0.0, AudioTrack.maxGain).toDouble()));
+  }
+
+  /// Splits the audio segment playing at timeline [at] in two: the left
+  /// part keeps its id, the right one gets [newSegmentId] and continues
+  /// the file where the left one stops (an open-ended segment leaves its
+  /// right part open-ended). [sourceLength] bounds an open-ended segment.
+  /// [CompositionErrorKind.invalidSplit] when no segment plays at [at] or
+  /// a part would be shorter than [AudioSegment.minDuration].
+  Composition splitAudio(Duration at, {required String newSegmentId, Duration? sourceLength}) {
+    final audio = _audio();
+    if (audio.segmentById(newSegmentId) != null) {
+      throw CompositionException(CompositionErrorKind.duplicateId, 'Audio segment id "$newSegmentId" is already used.');
+    }
+    final segment = audio.segmentAt(at, sourceLength: sourceLength);
+    final end = segment == null ? null : (sourceLength == null ? segment.end : segment.endFor(sourceLength));
+    if (segment == null ||
+        at < segment.start + AudioSegment.minDuration ||
+        (end != null && at > end - AudioSegment.minDuration)) {
+      throw CompositionException(CompositionErrorKind.invalidSplit, 'Split point $at is not inside an audio segment.');
+    }
+    final cut = segment.sourceIn + (at - segment.start);
+    final left = segment.copyWith(sourceOut: cut);
+    final right = segment.copyWith(id: newSegmentId, start: at, sourceIn: cut);
+    return setAudio(_guard(() => audio.copyWith(segments: [
+          for (final other in audio.segments)
+            if (other.id != segment.id) other,
+          left,
+          right,
+        ])));
+  }
+
+  /// Moves the audio segment to timeline [start]: it lands in the free gap
+  /// between the other segments nearest to [start] that fits it, so it
+  /// never overlaps and never starts before 0. An open-ended segment is as
+  /// long as the rest of the file ([sourceLength]), unbounded without it.
+  Composition moveAudioSegment(String segmentId, Duration start, {Duration? sourceLength}) {
+    final audio = _audio();
+    final segment = _audioSegment(audio, segmentId);
+    final others = [
+      for (final other in audio.segments)
+        if (other.id != segmentId) other,
+    ];
+    final length = sourceLength == null ? segment.duration : segment.endFor(sourceLength) - segment.start;
+    final placed = _placeAudioInGap(others, start, length, sourceLength);
+    if (placed == null) return this;
+    return setAudio(_guard(() => audio.copyWith(segments: [...others, segment.copyWith(start: placed)])));
+  }
+
+  /// Moves [edge] of the audio segment by [delta] (timeline time): the
+  /// start edge trims `sourceIn` (the end stays), the end edge trims
+  /// `sourceOut` (the start stays), each stopped at the file bounds, at the
+  /// neighbouring segments, at the timeline start and at
+  /// [AudioSegment.minDuration]. The end edge of an open-ended segment needs
+  /// [sourceLength] ([CompositionErrorKind.invalidValue] otherwise); an end
+  /// landing on the file end leaves the segment open-ended.
+  Composition trimAudioSegment(String segmentId, AudioEdge edge, Duration delta, {Duration? sourceLength}) {
+    final audio = _audio();
+    final segment = _audioSegment(audio, segmentId);
+    final index = audio.segments.indexOf(segment);
+    final previous = index > 0 ? audio.segments[index - 1] : null;
+    final next = index + 1 < audio.segments.length ? audio.segments[index + 1] : null;
+    final AudioSegment updated;
+    switch (edge) {
+      case AudioEdge.start:
+        final end = sourceLength == null ? segment.end : segment.endFor(sourceLength);
+        var start = segment.start + delta;
+        final lower = _maxDuration(previous == null ? Duration.zero : previous.end ?? Duration.zero, Duration.zero);
+        // Never before the file start: the source in is start − offset.
+        if (start < segment.offset) start = segment.offset;
+        if (start < lower) start = lower;
+        if (end != null && start > end - AudioSegment.minDuration) start = end - AudioSegment.minDuration;
+        if (start < Duration.zero) start = Duration.zero;
+        updated = segment.copyWith(start: start, sourceIn: segment.sourceIn + (start - segment.start));
+      case AudioEdge.end:
+        final current = segment.sourceOut ?? sourceLength;
+        if (current == null) {
+          throw const CompositionException(
+              CompositionErrorKind.invalidValue, 'The end of an open-ended audio segment needs the file length.');
+        }
+        var sourceOut = current + delta;
+        final minimum = segment.sourceIn + AudioSegment.minDuration;
+        if (sourceOut < minimum) sourceOut = minimum;
+        if (sourceLength != null && sourceOut > sourceLength) sourceOut = sourceLength;
+        if (next != null) {
+          final room = next.start - segment.start + segment.sourceIn;
+          if (sourceOut > room) sourceOut = room;
+        }
+        updated = sourceLength != null && sourceOut >= sourceLength
+            ? segment.copyWith(openEnded: true)
+            : segment.copyWith(sourceOut: sourceOut);
+    }
+    if (updated == segment) return this;
+    return setAudio(_guard(() => audio.copyWith(segments: [
+          for (final other in audio.segments) other.id == segmentId ? updated : other,
+        ])));
+  }
+
+  /// Removes the audio segment; removing the last one removes the track.
+  Composition removeAudioSegment(String segmentId) {
+    final audio = _audio();
+    _audioSegment(audio, segmentId);
+    if (audio.segments.length == 1) return setAudio(null);
+    return setAudio(audio.copyWith(segments: [
+      for (final other in audio.segments)
+        if (other.id != segmentId) other,
+    ]));
+  }
+
+  // ------------------------------------------------------ project settings
+
+  /// Changes the output layout, keeping every clip: file clips of another
+  /// layout are left for the application to report, generator and effect
+  /// clips render at the new target, and the clip regions (pixel masks
+  /// included) are fitted to it ([Region.normalized]).
+  Composition setTarget(OutputSpec target) {
+    if (target == this.target) return this;
+    return copyWith(
+      target: target,
+      tracks: [
+        for (final track in tracks)
+          track.copyWith(clips: [
+            for (final clip in track.clips) clip.copyWith(region: clip.region.normalized(target)),
+          ]),
+      ],
+    );
+  }
+
+  /// Changes the frame rate ([CompositionErrorKind.invalidValue] for one
+  /// outside [Composition.supportedFramerates]).
+  Composition setFramerate(Framerate framerate) =>
+      framerate == this.framerate ? this : _guard(() => copyWith(framerate: framerate));
+
+  /// Renames the composition ([CompositionErrorKind.invalidValue] for a name
+  /// with the NUL character).
+  Composition rename(String name) => name == this.name ? this : _guard(() => copyWith(name: name));
 
   /// Sets or (with `null`) removes the beat grid.
   Composition setTempo(Tempo? tempo) => tempo == null ? copyWith(removeTempo: true) : copyWith(tempo: tempo);
 
   // ---------------------------------------------------------------- helpers
+
+  AudioTrack _audio() =>
+      audio ??
+      (throw const CompositionException(CompositionErrorKind.invalidValue, 'The composition has no soundtrack.'));
+
+  AudioSegment _audioSegment(AudioTrack audio, String segmentId) =>
+      audio.segmentById(segmentId) ??
+      (throw CompositionException(CompositionErrorKind.audioSegmentNotFound, 'Audio segment "$segmentId" not found.'));
 
   VisualTrack _track(String trackId) =>
       trackById(trackId) ??
@@ -915,6 +1100,41 @@ Duration _placeInGap(List<Clip> clips, Duration desired, Duration duration) {
   }
   consider(gapStart, null);
   return best!;
+}
+
+/// Start of a span of [length] (`null` = unbounded) placed in the free gap
+/// between the audio [segments] that fits it and is nearest to [desired];
+/// `null` when nothing fits. Open-ended segments are resolved against
+/// [sourceLength] (unbounded without it).
+Duration? _placeAudioInGap(List<AudioSegment> segments, Duration desired, Duration? length, Duration? sourceLength) {
+  final sorted = [...segments]..sort((a, b) => a.start.compareTo(b.start));
+  Duration? best;
+  var bestDistance = 0;
+  var gapStart = Duration.zero;
+  var open = false;
+  void consider(Duration from, Duration? to) {
+    if (length == null && to != null) return;
+    if (to != null && to - from < length!) return;
+    var start = desired < from ? from : desired;
+    if (to != null && start + length! > to) start = to - length;
+    final distance = (start - desired).inMicroseconds.abs();
+    if (best == null || distance < bestDistance) {
+      best = start;
+      bestDistance = distance;
+    }
+  }
+
+  for (final segment in sorted) {
+    consider(gapStart, segment.start);
+    final end = sourceLength == null ? segment.end : segment.endFor(sourceLength);
+    if (end == null) {
+      open = true;
+      break;
+    }
+    if (end > gapStart) gapStart = end;
+  }
+  if (!open) consider(gapStart, null);
+  return best;
 }
 
 /// Plain edge drag of a clip that plays once: moves the trim.

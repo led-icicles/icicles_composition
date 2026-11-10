@@ -13,7 +13,7 @@ export 'src/edit/composition_edits.dart';
 export 'src/edit/composition_exception.dart';
 export 'src/edit/snapper.dart';
 export 'src/edit/source_info.dart';
-export 'src/model/audio_ref.dart';
+export 'src/model/audio_track.dart';
 export 'src/model/clip.dart';
 export 'src/model/clip_label.dart';
 export 'src/model/composition.dart';

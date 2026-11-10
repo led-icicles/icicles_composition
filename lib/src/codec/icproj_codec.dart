@@ -1,11 +1,12 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:collection/collection.dart';
 import 'package:equatable/equatable.dart';
 import 'package:icicles_animation_dart/icicles_animation_dart.dart';
 import 'package:icicles_generators/icicles_generators.dart';
 
-import '../model/audio_ref.dart';
+import '../model/audio_track.dart';
 import '../model/clip.dart';
 import '../model/clip_label.dart';
 import '../model/composition.dart';
@@ -121,6 +122,12 @@ class IcprojDecodeResult {
 ///   pixels, little-endian bits), omitted when absent.
 /// - A mask clip ([Clip.isMask]) carries `"mask": true` (omitted when
 ///   false); it makes the document version 2.
+/// - The soundtrack is `"audio": {"path", "gain", "offsetUs"}` in version 1
+///   (one open-ended segment of the whole file at that timeline offset) and,
+///   once split, moved or trimmed, `{"path", "gain", "segments": [{"id",
+///   "startUs", "sourceInUs", "sourceOutUs"?}]}` in version 2 (`sourceOutUs`
+///   omitted for a segment playing to the file end). A plain soundtrack is
+///   still written in the version 1 shape.
 /// - Version 2 also adds, each omitted at its default: a clip `"reverse"`,
 ///   `"pingPong"` (booleans) and `"label"` (a [ClipLabel] name), a track
 ///   `"solo"`, a marker `"color"` (a [ClipLabel] name) and the composition
@@ -154,6 +161,7 @@ abstract final class IcprojCodec {
   /// ([Region.isClassic]); [currentVersion] otherwise.
   static int versionFor(Composition composition) {
     if (composition.loopRange != null) return currentVersion;
+    if (composition.audio case final audio? when !audio.isSingleWhole) return currentVersion;
     if (composition.macros.isNotEmpty) return currentVersion;
     if (composition.tracks.any((track) => track.solo)) return currentVersion;
     if (composition.markers.any((marker) => marker.color != ClipLabel.none)) return currentVersion;
@@ -183,8 +191,7 @@ abstract final class IcprojCodec {
         'tracks': [
           for (final track in composition.tracks) _trackToJson(track, legacy: versionFor(composition) == 1),
         ],
-        if (composition.audio case final audio?)
-          'audio': {'path': audio.path, 'gain': audio.gain, 'offsetUs': audio.offset.inMicroseconds},
+        if (composition.audio case final audio?) 'audio': _audioToJson(audio),
         if (composition.tempo case final tempo?)
           'tempo': {'bpm': tempo.bpm, 'firstBeatOffsetUs': tempo.firstBeatOffset.inMicroseconds},
         'markers': [
@@ -212,6 +219,26 @@ abstract final class IcprojCodec {
                 } else
                   'defaultColor': colorToHex(macro.defaultValue as Color),
                 'binding': ParamBindingJson.toJson(macro.binding),
+              },
+          ],
+      };
+
+  /// The version 1 shape `{path, gain, offsetUs}` for a plain soundtrack
+  /// ([AudioTrack.isSingleWhole]), else `{path, gain, segments: [{id,
+  /// startUs, sourceInUs, sourceOutUs?}]}`.
+  static Map<String, Object?> _audioToJson(AudioTrack audio) => {
+        'path': audio.path,
+        'gain': audio.gain,
+        if (audio.isSingleWhole)
+          'offsetUs': audio.offset.inMicroseconds
+        else
+          'segments': [
+            for (final segment in audio.segments)
+              {
+                'id': segment.id,
+                'startUs': segment.start.inMicroseconds,
+                'sourceInUs': segment.sourceIn.inMicroseconds,
+                if (segment.sourceOut case final out?) 'sourceOutUs': out.inMicroseconds,
               },
           ],
       };
@@ -513,15 +540,10 @@ class _Decoder {
       }
     }
 
-    AudioRef? audio;
+    AudioTrack? audio;
     if (json['audio'] != null) {
       try {
-        final fields = _Fields.of(json['audio'], r'$.audio', problems);
-        audio = AudioRef(
-          path: fields.requiredString('path'),
-          gain: fields.number('gain', 1.0, min: 0, max: AudioRef.maxGain),
-          offset: fields.duration('offsetUs', Duration.zero),
-        );
+        audio = _audio(_Fields.of(json['audio'], r'$.audio', problems));
       } on _Invalid catch (error) {
         problems.add(IcprojProblem(IcprojProblemKind.droppedAudio, r'$.audio', error.message));
       }
@@ -584,6 +606,46 @@ class _Decoder {
       macros: macros,
     );
     return IcprojDecodeResult(composition, problems);
+  }
+
+  /// The soundtrack: the version 1 `offsetUs` becomes one open-ended
+  /// segment; unreadable or overlapping segments are dropped
+  /// (`droppedAudio` at the segment's path), the track with them when none
+  /// is left.
+  AudioTrack _audio(_Fields fields) {
+    final path = fields.requiredString('path');
+    final gain = fields.number('gain', 1.0, min: 0, max: AudioTrack.maxGain);
+    if (fields.json['segments'] == null) {
+      return AudioTrack.single(path: path, gain: gain, offset: fields.duration('offsetUs', Duration.zero));
+    }
+    final segments = <AudioSegment>[];
+    final ids = <String>{};
+    for (final (index, value) in fields.list('segments').indexed) {
+      final segmentPath = '${fields.path}.segments[$index]';
+      try {
+        final segmentFields = _Fields.of(value, segmentPath, problems);
+        final sourceIn = segmentFields.duration('sourceInUs', Duration.zero, min: 0);
+        final out = segmentFields.optionalInt('sourceOutUs');
+        final segment = AudioSegment(
+          id: segmentFields.requiredString('id'),
+          start: segmentFields.requiredDuration('startUs', min: 0),
+          sourceIn: sourceIn,
+          sourceOut: out == null ? null : Duration(microseconds: out),
+        );
+        if (!ids.add(segment.id)) throw _Invalid('Duplicate audio segment id "${segment.id}".');
+        final previous = segments.lastOrNull;
+        if (previous != null && (previous.end == null || previous.end! > segment.start)) {
+          throw _Invalid('Audio segment "${segment.id}" overlaps "${previous.id}".');
+        }
+        segments.add(segment);
+      } on _Invalid catch (error) {
+        problems.add(IcprojProblem(IcprojProblemKind.droppedAudio, segmentPath, error.message));
+      } on ArgumentError catch (error) {
+        problems.add(IcprojProblem(IcprojProblemKind.droppedAudio, segmentPath, '${error.message}'));
+      }
+    }
+    if (segments.isEmpty) throw const _Invalid('No readable audio segment.');
+    return AudioTrack(path: path, gain: gain, segments: segments);
   }
 
   /// A macro definition; the binding is salvaged by [MacroDef] itself (an

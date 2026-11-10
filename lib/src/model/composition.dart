@@ -3,7 +3,7 @@ import 'package:equatable/equatable.dart';
 import 'package:icicles_animation_dart/icicles_animation_dart.dart';
 import 'package:icicles_generators/icicles_generators.dart';
 
-import 'audio_ref.dart';
+import 'audio_track.dart';
 import 'clip.dart';
 import 'loop_range.dart';
 import 'macro_def.dart';
@@ -32,7 +32,8 @@ class Composition extends Equatable {
   /// Ordered bottom to top.
   final List<VisualTrack> tracks;
 
-  final AudioRef? audio;
+  /// The music track, `null` without a soundtrack.
+  final AudioTrack? audio;
   final Tempo? tempo;
 
   /// Sorted by time.
@@ -143,7 +144,7 @@ class Composition extends Equatable {
     OutputSpec? target,
     Framerate? framerate,
     List<VisualTrack>? tracks,
-    AudioRef? audio,
+    AudioTrack? audio,
     bool removeAudio = false,
     Tempo? tempo,
     bool removeTempo = false,

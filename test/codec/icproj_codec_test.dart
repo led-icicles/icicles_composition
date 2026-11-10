@@ -48,7 +48,7 @@ Composition fullComposition() => Composition(
               region: const Region.iciclesOnly()),
         ]),
       ],
-      audio: AudioRef(path: '../music/song.mp3', gain: 0.9, offset: ms(-120)),
+      audio: AudioTrack.single(path: '../music/song.mp3', gain: 0.9, offset: ms(-120)),
       tempo: Tempo(bpm: 127.5, firstBeatOffset: ms(80)),
       markers: [Marker(id: 'm1', at: s(3), label: 'Drop')],
     );
@@ -235,7 +235,7 @@ void main() {
                   source: generatorRef(audioOrigin: audioOrigin), start: s(1), sourceIn: ms(500), sourceOut: s(3)),
             ]),
           ],
-          audio: AudioRef(path: 'song.mp3', offset: ms(250)),
+          audio: AudioTrack.single(path: 'song.mp3', offset: ms(250)),
         );
 
     test('are written as version 2 with typed sources and round-trip', () {

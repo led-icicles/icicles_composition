@@ -34,7 +34,7 @@ void main() {
             testClip('e', source: effectRef(audioOrigin: audioOrigin), start: s(1), sourceIn: ms(500), sourceOut: s(3)),
           ]),
         ],
-        audio: AudioRef(path: 'song.mp3', offset: ms(250)),
+        audio: AudioTrack.single(path: 'song.mp3', offset: ms(250)),
       );
 
   group('effect sources', () {

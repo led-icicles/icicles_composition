@@ -397,7 +397,7 @@ void main() {
     var composition = testComposition()
         .addMarker(Marker(id: 'm2', at: s(2)))
         .addMarker(Marker(id: 'm1', at: s(1), label: 'drop'))
-        .setAudio(AudioRef(path: 'music.mp3', gain: 0.8))
+        .setAudio(AudioTrack.single(path: 'music.mp3', gain: 0.8))
         .setTempo(Tempo(bpm: 128));
     expect(composition.markers.map((marker) => marker.id), ['m1', 'm2']);
     composition = composition.updateMarker('m2', at: ms(-3)).removeMarker('m1');
@@ -510,7 +510,7 @@ void main() {
 
     test('setGeneratorBindings can bind and unbind the audio clock', () {
       final composition = withClips([generatorClip('g', start: s(2), sourceIn: ms(500))])
-          .setAudio(AudioRef(path: 'song.mp3', offset: ms(250)));
+          .setAudio(AudioTrack.single(path: 'song.mp3', offset: ms(250)));
       final bound = composition.setGeneratorBindings('g', const {}, audioBound: true);
       expect(refOf(bound, 'g').audioOrigin, s(2) - ms(500) - ms(250));
       expect(refOf(bound.setGeneratorBindings('g', const {}), 'g').audioOrigin, s(2) - ms(500) - ms(250));
@@ -519,7 +519,7 @@ void main() {
 
     test('audioOrigin follows move, trim, split, duplicate, the audio offset and its removal', () {
       final composition = withClips([generatorClip('g', start: s(3), audioOrigin: Duration.zero)])
-          .setAudio(AudioRef(path: 'song.mp3', offset: ms(250)));
+          .setAudio(AudioTrack.single(path: 'song.mp3', offset: ms(250)));
       expect(refOf(composition, 'g').audioOrigin, s(3) - ms(250));
       expect(audioOriginFor(composition, clipOf(composition, 'g')), s(3) - ms(250));
 
@@ -538,7 +538,7 @@ void main() {
       expect(refOf(duplicated, 'g3').audioOrigin,
           clipOf(duplicated, 'g3').start - clipOf(duplicated, 'g3').sourceIn - ms(250));
 
-      final shifted = moved.setAudio(AudioRef(path: 'song.mp3', offset: s(1)));
+      final shifted = moved.setAudio(AudioTrack.single(path: 'song.mp3', offset: s(1)));
       expect(refOf(shifted, 'g').audioOrigin, s(4));
       final silent = shifted.setAudio(null);
       expect(refOf(silent, 'g').audioOrigin, s(5));
@@ -546,7 +546,7 @@ void main() {
     });
 
     test('generators without audio keep a null audioOrigin', () {
-      final composition = withClips([generatorClip('g', start: s(3))]).setAudio(AudioRef(path: 'song.mp3'));
+      final composition = withClips([generatorClip('g', start: s(3))]).setAudio(AudioTrack.single(path: 'song.mp3'));
       expect(refOf(composition.moveClip('g', s(5)), 'g').audioOrigin, isNull);
       expect(refOf(composition.moveClip('g', s(5)), 'g'), generator());
     });
