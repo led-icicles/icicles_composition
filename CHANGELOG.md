@@ -1,0 +1,48 @@
+## 0.7.0
+
+- Macros. _Composition_ gains `macros: List<MacroDef>` (unique ids, `macroById`, `macroBindings` — what a bake takes as `BakeRequest.macros` — and `macrosUsedBy(bindings)`, the subset the given bindings read). `MacroDef { id, name, kind: MacroKind.number | color, min, max, defaultValue (double | Color), binding }` (`MacroDef.number(...)` / `MacroDef.color(...)`, `spec` — the `NumberParam`/`ColorParam` the binding is salvaged against at construction, `copyWith`). `macroIdsOf(binding)` walks a binding (stack base, modulator sources and depth bindings) for the macro ids it reads.
+- Edits: `addMacro` (`duplicateId`), `updateMacro(id, name:, min:, max:, defaultValue:)` (the binding is re-salvaged against the new range), `setMacroBinding(id, binding)`, `removeMacro(id)`; new `CompositionErrorKind.macroNotFound`. `applyAttributes` copies `MacroBinding`s like any other binding.
+- `.icproj` version 2: `"macros": [{"id", "name", "kind", "min", "max", "default" | "defaultColor", "binding"}]`, omitted when empty (a composition with macros is version 2). Unreadable macros are dropped with the new `IcprojProblemKind.droppedMacro`; an inverted range falls back to `0..1`, an unreadable binding to the default (`droppedBinding`).
+
+## 0.6.0
+
+- Effect clips (adjustment layers). _SourceRef_ gains a third kind, `EffectRef { effectId, effectVersion, bindings, seed, length, audioOrigin? }`; `GeneratorRef` and `EffectRef` share the sealed base `ParametricRef` (`programId`, `programVersion`, `bindings`, `seed`, `length`, `audioOrigin`, `usesAudio`, `copyWith`). `Clip.isEffect`, `Clip.isParametric`; an effect clip plays at speed 1, never loops and is never a mask (`ArgumentError`, `setClipMask` refuses with `invalidValue`).
+- _Compositor_: `renderAt`/`render`/`offlineClips` take an `EffectHost` (`effects:`; new `abstract interface class EffectHost { AnimationView apply(String clipId, EffectRef ref, int frameIndex, AnimationView input) }`, `EffectHostException(EffectHostErrorKind.unavailable | failed)`). While an effect clip is active the picture accumulated by the tracks below (and the earlier layers of its track) is handed to the host at the grid frame of the clip's source time (`frameIndexAt(framerate, sourceTime)`), and the result is composited back over the input with the clip's blend mode at the usual alpha factor (opacity × fades × track opacity × transition weight) inside the clip's region only; elsewhere, without a host or after an `EffectHostException` the input passes through. New `OfflineReason.effectUnavailable` / `effectFailed`, reported by `render` (host failures) and `offlineClips` (no host).
+- Edits: `addClip` accepts effect refs without a _SourceInfo_; `setGeneratorBindings`/`setGeneratorSeed` work on effect refs too (aliases `setEffectBindings`/`setEffectSeed`); `dragClipEdge`, `setClipSpeed`/`setClipLoop`, `reanchorGeneratorClips`/`audioOriginFor` and `applyAttributes` (bindings between clips of the same effect; the mask flag is skipped for effect targets) treat generator and effect clips alike.
+- `.icproj` version 2: a clip `source` may be `{"type": "effect", "id", "version", "seed", "lengthUs", "audioOriginUs"?, "params"}`, salvaged like a generator source; `"mask": true` on an effect clip is dropped with a `defaultedValue` problem.
+
+## 0.5.0
+
+- Timeline craft. _Clip_ gains `reverse` (plays the trimmed range backwards), `pingPong` (a looping clip alternates direction every pass; only with a loop, dropped when the loop is removed) and `label` (_ClipLabel_ `none`/`red`/`orange`/`yellow`/`green`/`blue`/`purple`, no effect on the render); `sourceTimeAt`/`extendedSourceTimeAt` honour them. _VisualTrack_ gains `solo` (while any track is solo only the solo tracks render: `Composition.hasSolo`, `isTrackAudible`). _Marker_ gains `color` (a _ClipLabel_). _Composition_ gains `loopRange` (_LoopRange_ `{start, end}`, the in/out points).
+- Edits: `setClipReverse`, `setClipPingPong`, `setClipLabel` (+ the same on `setClipProps`), `updateTrack(solo:)`, `updateMarker(color:)`, `moveMarker`, `setLoopRange`; multi-clip, all-or-nothing operations `moveClips(ids, delta, trackShift:)` (delta clamped at the timeline start, track shift clamped to the existing tracks, transitions between moved clips kept) and `nudgeClips`, `removeClips`, `rippleDelete(clipId)` (later clips of the track move left by the clip duration), `pasteClips(templates, at, trackId, newClipIds:)` (relative offsets kept, `at` clamped to 0) and `applyAttributes(targetIds, from, …)` (blend, opacity, fades clamped to each target, region fitted, mask, optionally the label, and the bindings of a generator target of the same generator). A move or paste that would overlap is refused with the new `CompositionErrorKind.overlap`.
+- _Compositor_: `render(range:)` exports the grid frames covering a _LoopRange_ (frame-identical to the preview); solo tracks honoured by `renderAt`, `render` and `offlineClips`.
+- `.icproj` version 2 adds, each omitted at its default: clip `reverse`, `pingPong`, `label`, track `solo`, marker `color` and the composition `loopRange: {startUs, endUs}`; unreadable values fall back to the defaults with a `defaultedValue` problem. Documents without them keep their version 1 bytes.
+
+## 0.4.0
+
+- _PixelMask_: a bit set over the target's icicle pixels (column-major `x · yCount + y`) followed by its radio panel pixels, with the dimensions it was made for: `PixelMask.full(target)` / `.empty(target)`, `contains(pixel)`, `containsPanelPixel(panel, led)` (1-based panel), `withPixel`, `withPanelPixel`, `withPixels`, `inverted()`, `fitTo(target)` (keeps overlapping pixels by position, new pixels included), `coveredCount`, `isFull`, `isEmpty`, `fits(target)`.
+- _Region_ gains `pixels: PixelMask?` (`null` = every pixel), intersected with `columns` and `panels` by the compositor (`affectsIciclePixel`, `affectsPanelPixel`, `hasPixelMask`); `isClassic` is `false` with a mask; `normalized(target)` re-dimensions the mask (a full one is dropped).
+- Mask layers: `Clip.isMask` (default `false`). A mask clip is not drawn; at every pixel the luminance (`Color.computeLuminance`, linear) of its composited output (its opacity, fades, transition weight and region — outside the region the lower tracks stay untouched) multiplies the color the tracks below (and the earlier layers of its own track) have accumulated so far, a Premiere-like track matte. The tracks above are unaffected. `setClipMask(clipId, isMask)`, `setClipProps(isMask:)`.
+- `.icproj` version 2: a region may carry `"pixels": {"x", "y", "panels", "panelPixels", "bits": base64}` (icicle pixels first, then panel pixels, little-endian bits; unreadable → every pixel with a `defaultedValue` problem, other dimensions fitted with a `clampedValue` problem) and a clip `"mask": true` (omitted when false). Either makes the document version 2; version 1 files are still written byte-identically.
+
+## 0.3.0
+
+- _Region_ is a value class instead of an enum: `icicles` (bool), `columns` (an inclusive 0-based _ColumnRange_, `null` = every column) and `panels` (sealed _RegionPanels_: `all()`, `none()`, `some({1-based indices})`). The old values are `Region.all()`, `Region.iciclesOnly()` and `Region.panelsOnly()`; `affectsPixel(x)`, `affectsPanel(index)`, `isEmpty`, `isClassic`, `normalized(target)`.
+- _Compositor_ masks per icicle column and per radio panel.
+- `.icproj`: a clip `region` is `{"icicles", "columns": [first, last]?, "panels": "all" | "none" | [indices]}` in version 2; the version 1 strings are still read, and a composition with classic regions only (and no generator clips) is still written as version 1, byte-identical to before. Unreadable regions fall back to `Region.all()` with a problem; out-of-range columns/panels are fitted to the target (`clampedValue`).
+
+## 0.2.0
+
+- Depends on _icicles_generators_ (path dependency for now). _Tempo_, `frameIndexAt` and `frameCountFor` now come from it and are re-exported unchanged.
+- _SourceRef_ is sealed: _AnimationFileRef_ (the former _SourceRef_: `path`, `contentHash`) and _GeneratorRef_ (`generatorId`, `generatorVersion`, `bindings`, `seed`, `length`, `audioOrigin`).
+- Generator clips: `addClip` needs no _SourceInfo_ for a _GeneratorRef_; `setGeneratorBindings`, `setGeneratorSeed`; `speed` is always 1 and they never loop (`setClipSpeed`/`setClipLoop` refuse with `invalidValue`); dragging the end edge grows or shrinks the generator `length` (stretch acts like trim, at most `maxBakeLength`). `audioOrigin` is kept at `clip.start − sourceIn − audio.offset` by every edit (`reanchorGeneratorClips`, `audioOriginFor`).
+- _OfflineReason_ gains `generatorUnavailable` and `generatorFailed` for the application to report.
+- `.icproj` version 2: a clip `source` carries a `type` (`file` or `generator`). Compositions without generator clips are still written as version 1, byte-identical to before; the codec reads both. New problem kind `droppedBinding`.
+
+## 0.1.0
+
+- Initial release, depends on _icicles_animation_dart_ `v3.2.0`.
+- Composition model: _Composition_, _OutputSpec_, _VisualTrack_, _Clip_ (trim, speed, loop, blend, opacity, fades, region), _Transition_, _SourceRef_, _AudioRef_, _Tempo_, _Marker_.
+- Pure edit operations (_CompositionEdits_) with typed _CompositionException_ errors, no same-track overlap, layout check, and _Snapper_.
+- `.icproj` codec (version 1) with per-element salvage and a stable encoder.
+- _Compositor_: `renderAt` for the preview and `render` for the export on the drift-free frame grid, with offline-source and firmware-delay warnings.

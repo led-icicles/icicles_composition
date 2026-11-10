@@ -1,0 +1,108 @@
+{
+  "audio": {
+    "gain": 0.9,
+    "offsetUs": -120000,
+    "path": "../music/song.mp3"
+  },
+  "format": "icproj",
+  "framerate": 45,
+  "markers": [
+    {
+      "atUs": 3000000,
+      "id": "m1",
+      "label": "Drop"
+    }
+  ],
+  "name": "Show",
+  "target": {
+    "animationVersion": 2,
+    "radioPanelPixelCount": 3,
+    "radioPanelsCount": 2,
+    "xCount": 3,
+    "yCount": 2
+  },
+  "tempo": {
+    "bpm": 127.5,
+    "firstBeatOffsetUs": 80000
+  },
+  "tracks": [
+    {
+      "clips": [
+        {
+          "blend": "normal",
+          "fadeInUs": 100000,
+          "fadeOutUs": 0,
+          "id": "a",
+          "opacity": 1.0,
+          "region": "all",
+          "source": {
+            "contentHash": "hash-a",
+            "path": "clips/a.anim"
+          },
+          "sourceInUs": 0,
+          "sourceOutUs": 2000000,
+          "speed": 1.0,
+          "startUs": 0
+        },
+        {
+          "blend": "screen",
+          "fadeInUs": 0,
+          "fadeOutUs": 300000,
+          "id": "b",
+          "loopDurationUs": 5000000,
+          "opacity": 0.5,
+          "region": "radioPanels",
+          "source": {
+            "contentHash": "hash-b",
+            "path": "clips/b.anim"
+          },
+          "sourceInUs": 250000,
+          "sourceOutUs": 1234567,
+          "speed": 0.75,
+          "startUs": 2000000
+        }
+      ],
+      "id": "base",
+      "locked": false,
+      "muted": false,
+      "name": "Base",
+      "opacity": 0.8,
+      "transitions": [
+        {
+          "alignment": "endAtCut",
+          "durationUs": 500000,
+          "fromClipId": "a",
+          "id": "x",
+          "toClipId": "b"
+        }
+      ]
+    },
+    {
+      "clips": [
+        {
+          "blend": "multiply",
+          "fadeInUs": 0,
+          "fadeOutUs": 0,
+          "id": "c",
+          "opacity": 1.0,
+          "region": "icicles",
+          "source": {
+            "contentHash": "hash-c",
+            "path": "clips/c.anim"
+          },
+          "sourceInUs": 0,
+          "sourceOutUs": 1000000,
+          "speed": 1.0,
+          "startUs": 1000000
+        }
+      ],
+      "id": "top",
+      "locked": true,
+      "muted": true,
+      "name": "Top",
+      "opacity": 1.0,
+      "transitions": []
+    }
+  ],
+  "version": 1
+}
