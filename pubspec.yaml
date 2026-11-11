@@ -18,7 +18,9 @@ dependencies:
       url: git@github.com:led-icicles/icicles_animation_dart.git
       ref: v3.2.0
   icicles_generators:
-    path: ../icicles_generators
+    git:
+      url: git@github.com:led-icicles/icicles_generators.git
+      ref: v0.6.0
 
 dev_dependencies:
   lints: ^6.1.0
