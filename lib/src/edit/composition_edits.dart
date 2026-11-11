@@ -128,34 +128,17 @@ extension CompositionEdits on Composition {
 
   /// Adds [clip] to the track.
   ///
-  /// A file clip needs the [source] info: the source must have the layout
-  /// of [target] ([CompositionErrorKind.layoutMismatch] otherwise) and the
-  /// trim is clamped to the source length. A generator or effect clip
-  /// ([ParametricRef]) needs none — they render at the target layout — and
-  /// its trim is clamped to the ref's length. The clip is placed in the
-  /// free gap nearest to its start that fits it.
+  /// An indexed clip (a file, image, drawing or nested composition,
+  /// [SourceRef.isIndexed]) needs the [source] info: the source must have
+  /// the layout of [target] ([CompositionErrorKind.layoutMismatch]
+  /// otherwise) and the trim is clamped to the source length. A generator
+  /// or effect clip ([ParametricRef]) needs none — they render at the
+  /// target layout — and its trim is clamped to the ref's length. The clip
+  /// is placed in the free gap nearest to its start that fits it.
   Composition addClip(String trackId, Clip clip, [SourceInfo? source]) {
     final track = _unlockedTrack(trackId);
     _ensureClipIdFree(clip.id);
-    final Duration sourceLength;
-    switch (clip.source) {
-      case ParametricRef(:final length):
-        sourceLength = length;
-      case AnimationFileRef(:final path):
-        if (source == null) {
-          throw CompositionException(CompositionErrorKind.invalidValue, 'Source "$path" needs its SourceInfo.');
-        }
-        if (!target.acceptsLayoutOf(source.header)) {
-          final header = source.header;
-          throw CompositionException(
-            CompositionErrorKind.layoutMismatch,
-            'Source "$path" is ${header.xCount}x${header.yCount} with ${header.radioPanelsCount} radio '
-            'panels of ${header.radioPanelPixelCount} pixels, the target is ${target.xCount}x${target.yCount} with '
-            '${target.radioPanelsCount} radio panels of ${target.radioPanelPixelCount} pixels.',
-          );
-        }
-        sourceLength = source.duration;
-    }
+    final sourceLength = _sourceLengthOf(clip.source, source);
     if (clip.sourceIn >= sourceLength) {
       throw CompositionException(
         CompositionErrorKind.invalidValue,
@@ -168,6 +151,55 @@ extension CompositionEdits on Composition {
     }
     final start = _placeInGap(track.clips, added.start, added.duration);
     return _replaceClips(track, [...track.clips, added.copyWith(start: start)]);
+  }
+
+  /// One pass of [source]: the ref's length for a parametric source, else
+  /// the [info]'s duration, which must be given and of the target layout.
+  Duration _sourceLengthOf(SourceRef source, SourceInfo? info) {
+    if (source case ParametricRef(:final length)) return length;
+    if (info == null) {
+      throw CompositionException(CompositionErrorKind.invalidValue, 'Source "${source.label}" needs its SourceInfo.');
+    }
+    if (!target.acceptsLayoutOf(info.header)) {
+      final header = info.header;
+      throw CompositionException(
+        CompositionErrorKind.layoutMismatch,
+        'Source "${source.label}" is ${header.xCount}x${header.yCount} with ${header.radioPanelsCount} radio '
+        'panels of ${header.radioPanelPixelCount} pixels, the target is ${target.xCount}x${target.yCount} with '
+        '${target.radioPanelsCount} radio panels of ${target.radioPanelPixelCount} pixels.',
+      );
+    }
+    return info.duration;
+  }
+
+  /// Replaces the source of the clip by [source] (an edited drawing, an
+  /// image with other options, a re-imported file): an indexed source
+  /// needs its [info] (checked against the target like [addClip]). The
+  /// trim is kept where it fits the new length and clamped otherwise (a
+  /// `sourceIn` beyond the end restarts at 0); the clip's end moves with
+  /// the trim, stopped at the next clip. A parametric source may only be
+  /// replaced by one of the same kind (`invalidValue`).
+  Composition setClipSource(String clipId, SourceRef source, [SourceInfo? info]) {
+    final (:track, :clip) = _editableClip(clipId);
+    if (clip.source.isIndexed != source.isIndexed) {
+      throw CompositionException(
+          CompositionErrorKind.invalidValue, 'Clip "$clipId" cannot change between indexed and parametric sources.');
+    }
+    final length = _sourceLengthOf(source, info);
+    var sourceIn = clip.sourceIn;
+    var sourceOut = clip.sourceOut;
+    if (sourceIn >= length) {
+      sourceIn = Duration.zero;
+      sourceOut = length;
+    } else if (sourceOut > length) {
+      sourceOut = length;
+    }
+    var updated = _guard(() => clip.copyWith(source: source, sourceIn: sourceIn, sourceOut: sourceOut));
+    final upper = _bounds(track, clip).upper;
+    if (upper != null && updated.end > upper) {
+      updated = _stretch(updated, ClipEdge.end, upper, _bounds(track, clip));
+    }
+    return _replaceClips(track, [for (final other in track.clips) other.id == clipId ? updated : other]);
   }
 
   /// Replaces the parameter bindings of a generator or effect clip

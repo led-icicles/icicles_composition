@@ -20,6 +20,7 @@ import '../model/source_ref.dart';
 import '../model/transition.dart';
 import '../model/transition_fitting.dart';
 import '../model/visual_track.dart';
+import 'drawing_pixels_codec.dart';
 
 /// Why a `.icproj` document could not be read at all.
 enum IcprojErrorKind {
@@ -62,6 +63,10 @@ enum IcprojProblemKind {
   droppedMacro,
   droppedAudio,
   droppedTempo,
+
+  /// A drawing frame was unreadable and was dropped (a drawing without a
+  /// readable frame drops its clip).
+  droppedFrame,
 
   /// A generator parameter binding was unreadable and was dropped; the
   /// parameter uses its default.
@@ -155,8 +160,9 @@ abstract final class IcprojCodec {
   /// File extension, without the dot.
   static const fileExtension = 'icproj';
 
-  /// The `version` [composition] is written as: 1 without generator or
-  /// effect clips, mask, reversed, ping-pong or labelled clips, solo tracks,
+  /// The `version` [composition] is written as: 1 with file clips only (no
+  /// generator, effect, image, drawing or nested-composition clips), without
+  /// mask, reversed, ping-pong or labelled clips, solo tracks,
   /// colored markers, macros or a loop range, and with classic regions only
   /// ([Region.isClassic]); [currentVersion] otherwise.
   static int versionFor(Composition composition) {
@@ -167,7 +173,7 @@ abstract final class IcprojCodec {
     if (composition.markers.any((marker) => marker.color != ClipLabel.none)) return currentVersion;
     final needsV2 = composition.placedClips.any((placed) {
       final clip = placed.clip;
-      return clip.source is ParametricRef ||
+      return clip.source is! AnimationFileRef ||
           clip.isMask ||
           clip.reverse ||
           clip.pingPong ||
@@ -243,6 +249,25 @@ abstract final class IcprojCodec {
           ],
       };
 
+  /// A clip source as its `.icproj` JSON object (the version 2 shape, with
+  /// `type`): what the application stores when it keeps a source outside a
+  /// document (e.g. the media bin's unplaced sources).
+  static Map<String, Object?> sourceToJson(SourceRef source) => _sourceToJson(source, legacy: false);
+
+  /// Reads a source written by [sourceToJson] (salvage problems are
+  /// repaired silently); throws an [IcprojException] (`invalidProject`) for
+  /// an unreadable one.
+  static SourceRef sourceFromJson(Object? json) {
+    final decoder = _Decoder();
+    try {
+      return decoder._source(_Fields.of(json, r'$', decoder.problems));
+    } on _Invalid catch (error) {
+      throw IcprojException(IcprojErrorKind.invalidProject, error.message);
+    } on ArgumentError catch (error) {
+      throw IcprojException(IcprojErrorKind.invalidProject, '${error.message}');
+    }
+  }
+
   /// Reads a `.icproj` document; throws an [IcprojException] when it cannot
   /// be read at all.
   static IcprojDecodeResult decode(String source) {
@@ -315,6 +340,32 @@ Map<String, Object?> _sourceToJson(SourceRef source, {required bool legacy}) => 
         },
       GeneratorRef() => _parametricToJson('generator', source),
       EffectRef() => _parametricToJson('effect', source),
+      ImageRef(:final paths, :final contentHash, :final fit, :final panels, :final frameDuration) => {
+          'type': 'image',
+          if (paths.length == 1) 'path': paths.single else 'paths': paths,
+          'contentHash': contentHash,
+          'fit': fit.name,
+          'panels': panels.name,
+          if (frameDuration != null) 'frameDurationUs': frameDuration.inMicroseconds,
+        },
+      DrawingRef() => {
+          'type': 'drawing',
+          'id': source.id,
+          'name': source.name,
+          'x': source.xCount,
+          'y': source.yCount,
+          'panels': source.radioPanelsCount,
+          'panelPixels': source.radioPanelPixelCount,
+          'frames': [
+            for (final frame in source.frames)
+              {'durationUs': frame.duration.inMicroseconds, 'pixels': DrawingPixelsCodec.encode(frame.pixels)},
+          ],
+        },
+      CompositionRef(:final path, :final contentHash) => {
+          'type': 'composition',
+          'path': path,
+          'contentHash': contentHash,
+        },
     };
 
 Map<String, Object?> _parametricToJson(String type, ParametricRef source) => {
@@ -952,12 +1003,19 @@ class _Decoder {
   }
 
   /// A clip source: a file (the only kind of version 1, written without
-  /// `type`), a generator or an effect.
+  /// `type`), an image, a drawing, a nested composition, a generator or an
+  /// effect.
   SourceRef _source(_Fields fields) {
     final type = fields.json['type'];
     switch (type) {
       case null || 'file':
         return AnimationFileRef(path: fields.requiredString('path'), contentHash: fields.string('contentHash', ''));
+      case 'image':
+        return _image(fields);
+      case 'drawing':
+        return _drawing(fields);
+      case 'composition':
+        return CompositionRef(path: fields.requiredString('path'), contentHash: fields.string('contentHash', ''));
       case 'generator' || 'effect':
         final bindings = <String, ParamBinding>{};
         final params = fields.json['params'];
@@ -1004,5 +1062,80 @@ class _Decoder {
       default:
         throw _Invalid('${fields.path}.type "$type" is unknown.');
     }
+  }
+
+  /// `{type: "image", path | paths, contentHash, fit, panels,
+  /// frameDurationUs?}`; an unknown fit or panel mode falls back to the
+  /// default, a non-positive frame duration is dropped.
+  ImageRef _image(_Fields fields) {
+    final List<String> paths;
+    final many = fields.json['paths'];
+    if (many is List<Object?>) {
+      paths = [
+        for (final path in many)
+          if (path is String && path.isNotEmpty) path
+      ];
+      if (paths.isEmpty) throw _Invalid('${fields.path}.paths holds no path.');
+      if (paths.length != many.length) {
+        problems.add(IcprojProblem(
+            IcprojProblemKind.defaultedValue, '${fields.path}.paths', 'Unreadable entries were dropped.'));
+      }
+    } else {
+      if (many != null) fields._defaulted('paths', 'not a list');
+      paths = [fields.requiredString('path')];
+    }
+    final frameDuration = fields.optionalInt('frameDurationUs');
+    Duration? perFrame;
+    if (frameDuration != null) {
+      if (frameDuration > 0) {
+        perFrame = Duration(microseconds: frameDuration);
+      } else {
+        fields._defaulted('frameDurationUs', 'not positive');
+      }
+    }
+    return ImageRef(
+      paths: paths,
+      contentHash: fields.string('contentHash', ''),
+      fit: fields.enumByName('fit', ImageFit.values, ImageFit.cover),
+      panels: fields.enumByName('panels', ImagePanelMode.values, ImagePanelMode.average),
+      frameDuration: perFrame,
+    );
+  }
+
+  /// `{type: "drawing", id, name, x, y, panels, panelPixels, frames:
+  /// [{durationUs, pixels}]}`; an unreadable frame is dropped
+  /// ([IcprojProblemKind.droppedFrame]), a drawing without a readable frame
+  /// is invalid (its clip is dropped).
+  DrawingRef _drawing(_Fields fields) {
+    final xCount = fields.clamp<int>('x', fields.requiredInt('x'), 1, null);
+    final yCount = fields.clamp<int>('y', fields.requiredInt('y'), 1, null);
+    final panels = fields.clamp<int>('panels', fields.requiredInt('panels'), 0, null);
+    final panelPixels = fields.clamp<int>('panelPixels', fields.requiredInt('panelPixels'), 0, null);
+    final pixelCount = xCount * yCount + panels * panelPixels;
+    final frames = <DrawingFrame>[];
+    for (final (index, value) in fields.list('frames').indexed) {
+      final path = '${fields.path}.frames[$index]';
+      try {
+        final frame = _Fields.of(value, path, problems);
+        final duration = frame.requiredDuration('durationUs', min: DrawingFrame.minDuration.inMicroseconds);
+        final pixels = frame.json['pixels'];
+        if (pixels is! String) throw _Invalid('$path.pixels is not a string.');
+        frames.add(DrawingFrame(duration: duration, pixels: DrawingPixelsCodec.decode(pixels, pixelCount: pixelCount)));
+      } on _Invalid catch (error) {
+        problems.add(IcprojProblem(IcprojProblemKind.droppedFrame, path, error.message));
+      } on FormatException catch (error) {
+        problems.add(IcprojProblem(IcprojProblemKind.droppedFrame, path, 'Unreadable pixels: ${error.message}'));
+      }
+    }
+    if (frames.isEmpty) throw _Invalid('${fields.path}: no readable frame.');
+    return DrawingRef(
+      id: fields.requiredString('id'),
+      name: fields.string('name', 'Drawing'),
+      xCount: xCount,
+      yCount: yCount,
+      radioPanelsCount: panels,
+      radioPanelPixelCount: panelPixels,
+      frames: frames,
+    );
   }
 }

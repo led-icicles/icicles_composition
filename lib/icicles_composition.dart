@@ -8,6 +8,7 @@ library;
 
 export 'package:icicles_generators/icicles_generators.dart' show Tempo, frameCountFor, frameIndexAt;
 
+export 'src/codec/drawing_pixels_codec.dart';
 export 'src/codec/icproj_codec.dart';
 export 'src/edit/composition_edits.dart';
 export 'src/edit/composition_exception.dart';
