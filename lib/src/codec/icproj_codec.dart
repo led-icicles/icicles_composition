@@ -113,8 +113,10 @@ class IcprojDecodeResult {
 ///   convention); resolving them is the application's job.
 /// - A clip `source` is `{"type": "file", "path", "contentHash"}` or
 ///   `{"type": "generator", "id", "version", "seed", "lengthUs",
-///   "audioOriginUs"?, "params": {paramId: binding}}` (bindings in the
-///   [ParamBindingJson] form). Version 1 had file sources only, written
+///   "audioOriginUs"?, "params": {paramId: binding}, "reactivity"?: {…}}`
+///   (bindings in the [ParamBindingJson] form; `reactivity` in the
+///   `AudioReactivityJson` form, omitted while it is `AudioReactivity.none`
+///   — an unreadable one falls back to none with `defaultedValue`). Version 1 had file sources only, written
 ///   without `type`; a composition without generator clips is still written
 ///   as version 1, exactly as before, so existing files do not change.
 /// - A clip `region` is `{"icicles": bool, "columns": [first, last]?,
@@ -376,6 +378,7 @@ Map<String, Object?> _parametricToJson(String type, ParametricRef source) => {
       'lengthUs': source.length.inMicroseconds,
       if (source.audioOrigin case final origin?) 'audioOriginUs': origin.inMicroseconds,
       'params': ParamBindingJson.bindingsToJson(source.bindings),
+      if (source.reactivity != AudioReactivity.none) 'reactivity': AudioReactivityJson.toJson(source.reactivity),
     };
 
 Map<String, Object?> _clipToJson(Clip clip, {required bool legacy}) => {
@@ -1034,6 +1037,15 @@ class _Decoder {
         }
         final seed = fields.optionalInt('seed');
         if (seed == null) fields._defaulted('seed', 'missing');
+        var reactivity = AudioReactivity.none;
+        if (fields.json['reactivity'] case final Object? raw?) {
+          final decoded = AudioReactivityJson.fromJson(raw);
+          if (decoded == null) {
+            fields._defaulted('reactivity', 'not a readable reactivity');
+          } else {
+            reactivity = decoded;
+          }
+        }
         final origin = fields.optionalInt('audioOriginUs');
         final id = fields.requiredString('id');
         final version = fields.clamp<int>('version', fields.requiredInt('version'), 0, null);
@@ -1049,6 +1061,7 @@ class _Decoder {
             seed: seed ?? 0,
             length: length,
             audioOrigin: audioOrigin,
+            reactivity: reactivity,
           );
         }
         return GeneratorRef(
@@ -1058,6 +1071,7 @@ class _Decoder {
           seed: seed ?? 0,
           length: length,
           audioOrigin: audioOrigin,
+          reactivity: reactivity,
         );
       default:
         throw _Invalid('${fields.path}.type "$type" is unknown.');

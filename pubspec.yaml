@@ -3,7 +3,7 @@ description: >-
   Timeline compositions of icicles animations: the composition model, pure
   edit operations, the .icproj project codec and the compositor that renders
   a composition into a single .anim animation.
-version: 0.9.0
+version: 0.10.0
 publish_to: "none"
 repository: https://github.com/led-icicles/icicles_composition
 
@@ -18,9 +18,7 @@ dependencies:
       url: git@github.com:led-icicles/icicles_animation_dart.git
       ref: v3.2.0
   icicles_generators:
-    git:
-      url: git@github.com:led-icicles/icicles_generators.git
-      ref: v0.6.0
+    path: ../icicles_generators
 
 dev_dependencies:
   lints: ^6.1.0

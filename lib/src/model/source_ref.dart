@@ -64,9 +64,10 @@ final class AnimationFileRef extends SourceRef {
 }
 
 /// A source made of code with parameters ([GeneratorRef] or [EffectRef]):
-/// parameter bindings, a seed, a length on the frame grid and an optional
-/// anchor on the audio clock. Clips of such sources always play at speed 1
-/// and never loop; the edit operations treat both kinds alike.
+/// parameter bindings, a seed, a length on the frame grid, the universal
+/// audio reactivity and an optional anchor on the audio clock. Clips of such
+/// sources always play at speed 1 and never loop; the edit operations treat
+/// both kinds alike.
 sealed class ParametricRef extends SourceRef {
   /// Id of the generator or effect.
   String get programId;
@@ -85,16 +86,23 @@ sealed class ParametricRef extends SourceRef {
   /// clip's `sourceOut` never exceeds it. Positive, at most [maxBakeLength].
   final Duration length;
 
-  /// Song time at generator/effect time 0, non-`null` only when the program
-  /// or a binding reads the audio. The edit operations keep it equal to
-  /// `clip.start − clip.sourceIn − audio.offset` (`audioOriginFor`).
+  /// Song time at generator/effect time 0, non-`null` only when the program,
+  /// a binding or the reactivity reads the audio. The edit operations keep
+  /// it equal to `clip.start − clip.sourceIn − audio.offset`
+  /// (`audioOriginFor`).
   final Duration? audioOrigin;
+
+  /// The universal audio reactivity applied around the program
+  /// (`BakeRequest.reactivity`); [AudioReactivity.none] by default. A ref
+  /// with an active reactivity is audio-bound ([audioOrigin] set).
+  final AudioReactivity reactivity;
 
   ParametricRef({
     required Map<String, ParamBinding> bindings,
     required this.seed,
     required this.length,
     required this.audioOrigin,
+    this.reactivity = AudioReactivity.none,
   }) : bindings = Map.unmodifiable(bindings) {
     if (length <= Duration.zero || length > maxBakeLength) {
       throw ArgumentError.value(length, 'length', 'Must be positive and at most $maxBakeLength.');
@@ -112,6 +120,7 @@ sealed class ParametricRef extends SourceRef {
     Duration? length,
     Duration? audioOrigin,
     bool removeAudioOrigin = false,
+    AudioReactivity? reactivity,
   });
 
   @override
@@ -124,6 +133,7 @@ sealed class ParametricRef extends SourceRef {
         seed,
         length,
         audioOrigin,
+        reactivity,
         // Map contents in a stable order, so equal bindings compare equal.
         for (final key in bindings.keys.toList()..sort()) (key, bindings[key]),
       ];
@@ -149,6 +159,7 @@ final class GeneratorRef extends ParametricRef {
     required super.seed,
     required super.length,
     super.audioOrigin,
+    super.reactivity,
   }) {
     if (generatorId.isEmpty) {
       throw ArgumentError.value(generatorId, 'generatorId', 'Must not be empty.');
@@ -173,6 +184,7 @@ final class GeneratorRef extends ParametricRef {
     Duration? length,
     Duration? audioOrigin,
     bool removeAudioOrigin = false,
+    AudioReactivity? reactivity,
   }) =>
       GeneratorRef(
         generatorId: generatorId ?? this.generatorId,
@@ -181,11 +193,12 @@ final class GeneratorRef extends ParametricRef {
         seed: seed ?? this.seed,
         length: length ?? this.length,
         audioOrigin: removeAudioOrigin ? null : (audioOrigin ?? this.audioOrigin),
+        reactivity: reactivity ?? this.reactivity,
       );
 
   @override
   String toString() => 'GeneratorRef($generatorId v$generatorVersion, seed $seed, $length'
-      '${audioOrigin == null ? '' : ', audio at $audioOrigin'})';
+      '${audioOrigin == null ? '' : ', audio at $audioOrigin'}${reactivity.isActive ? ', $reactivity' : ''})';
 }
 
 /// An effect configuration: an *adjustment layer*. While its clip is
@@ -211,6 +224,7 @@ final class EffectRef extends ParametricRef {
     required super.seed,
     required super.length,
     super.audioOrigin,
+    super.reactivity,
   }) {
     if (effectId.isEmpty) {
       throw ArgumentError.value(effectId, 'effectId', 'Must not be empty.');
@@ -235,6 +249,7 @@ final class EffectRef extends ParametricRef {
     Duration? length,
     Duration? audioOrigin,
     bool removeAudioOrigin = false,
+    AudioReactivity? reactivity,
   }) =>
       EffectRef(
         effectId: effectId ?? this.effectId,
@@ -243,11 +258,12 @@ final class EffectRef extends ParametricRef {
         seed: seed ?? this.seed,
         length: length ?? this.length,
         audioOrigin: removeAudioOrigin ? null : (audioOrigin ?? this.audioOrigin),
+        reactivity: reactivity ?? this.reactivity,
       );
 
   @override
   String toString() => 'EffectRef($effectId v$effectVersion, seed $seed, $length'
-      '${audioOrigin == null ? '' : ', audio at $audioOrigin'})';
+      '${audioOrigin == null ? '' : ', audio at $audioOrigin'}${reactivity.isActive ? ', $reactivity' : ''})';
 }
 
 /// How an image is scaled onto the target grid (an [ImageRef]).

@@ -220,6 +220,21 @@ extension CompositionEdits on Composition {
   Composition setEffectBindings(String clipId, Map<String, ParamBinding> bindings, {bool? audioBound}) =>
       setGeneratorBindings(clipId, bindings, audioBound: audioBound);
 
+  /// Replaces the universal audio reactivity of a generator or effect clip
+  /// ([CompositionErrorKind.invalidValue] for a file clip). The clip becomes
+  /// audio-bound (`audioOrigin` anchored at [audioOriginFor]) when
+  /// [reactivity] is active; [audioBound] overrides what happens otherwise
+  /// — `true` anchors, `false` clears, `null` (default) keeps the current
+  /// state (the bindings may still read the audio).
+  Composition setReactivity(String clipId, AudioReactivity reactivity, {bool? audioBound}) =>
+      _updateParametric(clipId, (source) {
+        var updated = source.copyWith(reactivity: reactivity.normalized());
+        final bound = reactivity.isActive || audioBound == true;
+        if (bound && updated.audioOrigin == null) updated = updated.copyWith(audioOrigin: Duration.zero);
+        if (!bound && audioBound == false) updated = updated.copyWith(removeAudioOrigin: true);
+        return updated;
+      });
+
   /// Changes the seed of a generator or effect clip
   /// ([CompositionErrorKind.invalidValue] for a file clip).
   Composition setGeneratorSeed(String clipId, int seed) =>
@@ -503,8 +518,8 @@ extension CompositionEdits on Composition {
   /// to each target's duration), the [region] (fitted to the target
   /// layout), [isMask] (skipped for effect clips), [label] and, for a
   /// generator (effect) target of the same generator (effect) as [from],
-  /// its parameter bindings ([params]); the target keeps its seed and
-  /// length and follows the template's audio binding.
+  /// its parameter bindings and audio reactivity ([params]); the target
+  /// keeps its seed and length and follows the template's audio binding.
   /// A locked track or an unknown id refuses the whole operation.
   Composition applyAttributes(
     Iterable<String> targetIds,
@@ -538,11 +553,18 @@ extension CompositionEdits on Composition {
       if (params && fromSource is ParametricRef && source is ParametricRef) {
         if (fromSource.runtimeType == source.runtimeType && fromSource.programId == source.programId) {
           var copied = switch (source) {
-            GeneratorRef() =>
-              source.copyWith(bindings: fromSource.bindings, generatorVersion: fromSource.programVersion),
-            EffectRef() => source.copyWith(bindings: fromSource.bindings, effectVersion: fromSource.programVersion),
+            GeneratorRef() => source.copyWith(
+                bindings: fromSource.bindings,
+                generatorVersion: fromSource.programVersion,
+                reactivity: fromSource.reactivity,
+              ),
+            EffectRef() => source.copyWith(
+                bindings: fromSource.bindings,
+                effectVersion: fromSource.programVersion,
+                reactivity: fromSource.reactivity,
+              ),
           };
-          copied = fromSource.usesAudio
+          copied = fromSource.usesAudio || copied.reactivity.isActive
               ? copied.copyWith(audioOrigin: copied.audioOrigin ?? Duration.zero)
               : copied.copyWith(removeAudioOrigin: true);
           updated = _guard(() => updated.copyWith(source: copied));

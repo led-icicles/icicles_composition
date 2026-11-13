@@ -37,7 +37,7 @@ outside their ranges; the edit operations clamp first.
 | `Region` | `icicles`, `columns: ColumnRange?` (0-based, inclusive), `panels: RegionPanels` (`all()`, `none()`, `some({1-based})`), `pixels: PixelMask?` (per-pixel bit set, `null` = every pixel) |
 | `PixelMask` | bits over the icicle pixels (column-major `x · yCount + y`) then the radio panel pixels, plus the dimensions it was made for; `full`/`empty(target)`, `contains`, `containsPanelPixel(panel, led)`, `withPixel`, `withPanelPixel`, `withPixels`, `inverted()`, `fitTo(target)`, `coveredCount`, `isFull`, `isEmpty` |
 | `Transition` | `id`, `fromClipId`, `toClipId` (adjacent clips of one track), `duration`, `alignment` (`center`, `startAtCut`, `endAtCut`) |
-| `SourceRef` | sealed: `AnimationFileRef { path (as stored, relative to the project by convention), contentHash (opaque fingerprint for offline detection) }`, `GeneratorRef { generatorId, generatorVersion, … }` or `EffectRef { effectId, effectVersion, … }` — the last two share the sealed base `ParametricRef { programId, programVersion, bindings: Map<String, ParamBinding>, seed, length (≤ `maxBakeLength`), audioOrigin? }` from _icicles_generators_; equal refs share one bake / are one source. An effect clip (`Clip.isEffect`) is an adjustment layer over the tracks below, see Rendering |
+| `SourceRef` | sealed: `AnimationFileRef { path (as stored, relative to the project by convention), contentHash (opaque fingerprint for offline detection) }`, `GeneratorRef { generatorId, generatorVersion, … }` or `EffectRef { effectId, effectVersion, … }` — the last two share the sealed base `ParametricRef { programId, programVersion, bindings: Map<String, ParamBinding>, seed, length (≤ `maxBakeLength`), audioOrigin?, reactivity: AudioReactivity (the universal audio reactivity, `none` by default; an active one makes the ref audio-bound) }` from _icicles_generators_; equal refs share one bake / are one source. An effect clip (`Clip.isEffect`) is an adjustment layer over the tracks below, see Rendering |
 | `AudioRef` | `path`, `gain` (linear, 0–4), `offset` (timeline time of the file start; negative skips its beginning) |
 | `Tempo` | `bpm` (20–400), `firstBeatOffset` (re-exported from _icicles_generators_, like `frameIndexAt`/`frameCountFor`) |
 | `Marker` | `id`, `at`, `label` |
@@ -73,7 +73,8 @@ a true dissolve for opaque clips.
 - clips: `addClip` (a file clip needs its `SourceInfo` and is rejected when the header is not `hasSameLayout` with the
   target: `CompositionErrorKind.layoutMismatch`; a generator clip needs none), `moveClip` (across tracks too),
   `splitClip`, `removeClip`, `duplicateClip`, `setClipProps`, `setClipMask`, `setClipSpeed`, `setClipLoop`, `dragClipEdge`,
-  `setGeneratorBindings`, `setGeneratorSeed` (both also for effect clips: aliases `setEffectBindings`, `setEffectSeed`);
+  `setGeneratorBindings`, `setGeneratorSeed` (both also for effect clips: aliases `setEffectBindings`, `setEffectSeed`),
+  `setReactivity` (the universal audio reactivity of a generator or effect clip; an active one binds the clip to the audio clock);
 - transitions: `addTransition`, `updateTransition`, `removeTransition`;
 - `addMarker`, `updateMarker`, `removeMarker`, `setAudio`, `setTempo`.
 
@@ -170,7 +171,7 @@ integer microseconds in fields ending with `Us`.
 - `loopDurationUs`, `audio` and `tempo` are omitted when absent. Paths are stored as given; resolving them against the
   project file is the application's job.
 - Version 2 adds generator and effect clips: a clip `source` carries a `type`, `{"type": "file", "path", "contentHash"}`,
-  `{"type": "generator", "id", "version", "seed", "lengthUs", "audioOriginUs"?, "params": {paramId: binding}}` or the
+  `{"type": "generator", "id", "version", "seed", "lengthUs", "audioOriginUs"?, "params": {paramId: binding}, "reactivity"?: {…}}` (the `AudioReactivityJson` form, omitted while `none`; an unreadable one is defaulted) or the
   same shape with `"type": "effect"` (bindings in the `ParamBindingJson` form of _icicles_generators_). A composition
   without generator or effect clips is still
   written as version 1 (the shape above, no `type`), byte-identical to before; the codec reads both versions

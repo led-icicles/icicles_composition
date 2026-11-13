@@ -517,6 +517,35 @@ void main() {
       expect(refOf(bound.setGeneratorBindings('g', const {}, audioBound: false), 'g').audioOrigin, isNull);
     });
 
+    test('setReactivity replaces the reactivity of that clip and anchors it on the audio clock', () {
+      final composition =
+          withClips([generatorClip('g', start: s(2), sourceIn: ms(500)), generatorClip('h', start: s(8))])
+              .setAudio(AudioTrack.single(path: 'song.mp3', offset: ms(250)));
+      final reactive = composition.setReactivity('g', AudioReactivity.defaults);
+      expect(refOf(reactive, 'g').reactivity, AudioReactivity.defaults);
+      expect(refOf(reactive, 'g').audioOrigin, s(2) - ms(500) - ms(250), reason: 'an active reactivity binds');
+      expect(refOf(reactive, 'g').usesAudio, isTrue);
+      expect(refOf(reactive, 'h'), generator(), reason: 'other clips untouched');
+      expect(reactive.sources.length, 2);
+      // Re-anchors like every edit.
+      expect(refOf(reactive.moveClip('g', s(3)), 'g').audioOrigin, s(3) - ms(500) - ms(250));
+      // Turning it off keeps the anchor unless told otherwise.
+      final off = reactive.setReactivity('g', AudioReactivity.none);
+      expect(refOf(off, 'g').reactivity, AudioReactivity.none);
+      expect(refOf(off, 'g').audioOrigin, isNotNull);
+      expect(refOf(reactive.setReactivity('g', AudioReactivity.none, audioBound: false), 'g').audioOrigin, isNull);
+      expect(refOf(composition.setReactivity('g', AudioReactivity.none, audioBound: true), 'g').audioOrigin, isNotNull);
+      // Normalized on the way in.
+      final wild = composition.setReactivity('g', AudioReactivity.defaults.copyWith(sensitivity: 50));
+      expect(refOf(wild, 'g').reactivity.sensitivity, AudioReactivity.maxSensitivity);
+      expect(() => composition.setReactivity('f', AudioReactivity.defaults),
+          throwsComposition(CompositionErrorKind.clipNotFound));
+      expect(() => withClips([testClip('f', sourceOut: s(1))]).setReactivity('f', AudioReactivity.defaults),
+          throwsComposition(CompositionErrorKind.invalidValue));
+      expect(() => withClips([generatorClip('g')], locked: true).setReactivity('g', AudioReactivity.defaults),
+          throwsComposition(CompositionErrorKind.trackLocked));
+    });
+
     test('audioOrigin follows move, trim, split, duplicate, the audio offset and its removal', () {
       final composition = withClips([generatorClip('g', start: s(3), audioOrigin: Duration.zero)])
           .setAudio(AudioTrack.single(path: 'song.mp3', offset: ms(250)));

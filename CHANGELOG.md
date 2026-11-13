@@ -1,3 +1,15 @@
+## 0.10.0
+
+- Universal audio reactivity: `ParametricRef.reactivity: AudioReactivity` (`GeneratorRef` and `EffectRef`
+  constructors and `copyWith(reactivity:)`, part of equality; `AudioReactivity.none` by default). A ref with an
+  active reactivity is audio-bound: `setReactivity(clipId, reactivity, {bool? audioBound})` (normalizes the value,
+  anchors `audioOrigin` at `audioOriginFor` when the reactivity is active, otherwise keeps / sets / clears it
+  per `audioBound`; `invalidValue` for a file clip, `clipNotFound`, `trackLocked`), `applyAttributes` copies the
+  template's reactivity with its parameter bindings (`params`) and binds the target when it is active.
+- `.icproj` version 2 generator and effect sources carry `"reactivity": {…}` (`AudioReactivityJson`), omitted
+  while it is `none`; an unreadable value falls back to none with `defaultedValue` at `….source.reactivity`.
+- Depends on `icicles_generators` 0.7.0.
+
 ## 0.9.0
 
 - Media sources. _SourceRef_ gains three *indexed* kinds (`SourceRef.isIndexed`: the application supplies the `AnimationIndex` and the `SourceInfo`, like a file): `ImageRef { paths, contentHash, fit: ImageFit.cover | contain | stretch, panels: ImagePanelMode.average | off, frameDuration? }` (one image file, an animated GIF/APNG, or a sequence of files — `ImageRef.single`, `path`, `isSequence`, `defaultFrameDuration` 1/30 s; the application decodes and scales it onto the target), `DrawingRef { id, name, xCount, yCount, radioPanelsCount, radioPanelPixelCount, frames: List<DrawingFrame { duration, pixels: RGB bytes — icicle pixels column-major, then the panel pixels }> }` (a clip drawn by hand and stored in the project; `DrawingRef.blank`, `toViews()`, `header`, `fits(target)`, `panelPixelIndex`, `duration`, `DrawingFrame.blank`/`withPixels`/`colorAt`) and `CompositionRef { path, contentHash }` (a nested project the application renders at the parent target). `SourceInfo.ofDrawing`.

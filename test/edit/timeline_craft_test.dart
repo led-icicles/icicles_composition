@@ -276,6 +276,36 @@ void main() {
       expect(clipOf(short, 's').label, ClipLabel.purple);
     });
 
+    test('copies the parameters and the reactivity of a same-program template', () {
+      GeneratorRef rain({AudioReactivity reactivity = AudioReactivity.none, double speed = 1}) => GeneratorRef(
+            generatorId: 'icicles.rain',
+            generatorVersion: 1,
+            seed: 7,
+            length: s(4),
+            bindings: {'speed': ConstantBinding(speed)},
+            reactivity: reactivity,
+          );
+      final composition = testComposition(tracks: [
+        VisualTrack(id: 't', clips: [
+          testClip('tpl', source: rain(reactivity: AudioReactivity.defaults, speed: 2), sourceOut: s(1)),
+          testClip('g', source: rain(), start: s(2), sourceOut: s(1)),
+          testClip('other',
+              source: GeneratorRef(generatorId: 'icicles.snow', generatorVersion: 1, seed: 1, length: s(4)),
+              start: s(4),
+              sourceOut: s(1)),
+        ]),
+      ]);
+      final template = clipOf(composition, 'tpl');
+      final copied = composition.applyAttributes(['g', 'other'], template);
+      final g = clipOf(copied, 'g').source as GeneratorRef;
+      expect(g.reactivity, AudioReactivity.defaults);
+      expect(g.bindings, {'speed': const ConstantBinding(2.0)});
+      expect(g.audioOrigin, isNotNull, reason: 'follows the template\'s audio binding');
+      expect((clipOf(copied, 'other').source as GeneratorRef).reactivity, AudioReactivity.none);
+      final plain = composition.applyAttributes(['g'], template, params: false);
+      expect((clipOf(plain, 'g').source as GeneratorRef).reactivity, AudioReactivity.none);
+    });
+
     test('selects the attributes and refuses locked tracks as a whole', () {
       final composition = twoTracks().applyAttributes(['a'], template, blend: false, fades: false, isMask: false);
       expect(clipOf(composition, 'a').blend, BlendMode.normal);

@@ -268,6 +268,39 @@ void main() {
       expect(result.composition.findClip('g')!.clip.source, generatorRef(audioOrigin: ms(250)));
     });
 
+    test('writes an active reactivity, omits none and salvages an unreadable one', () {
+      const reactivity = AudioReactivity(
+        enabled: true,
+        range: AudioRangePreset.mids,
+        sensitivity: 1.5,
+        modes: {
+          ReactiveModeKind.brightness: ReactiveMode(min: 0.3, max: 1),
+          ReactiveModeKind.flash: ReactiveMode(min: 0, max: 0.8, trigger: ReactiveTrigger.onset),
+        },
+      );
+      final composition = withGenerator(audioOrigin: ms(250))
+          .setReactivity('g', reactivity)
+          .setEffectBindings('g', const {'speed': ConstantBinding(1.5)});
+      final json = jsonOf(composition);
+      final generator = (clipsOf(firstTrack(json))[1]! as Map<String, Object?>)['source']! as Map<String, Object?>;
+      expect(generator['reactivity'], AudioReactivityJson.toJson(reactivity));
+      expect((generator['reactivity']! as Map<String, Object?>)['range'], 'mids');
+      final result = IcprojCodec.decode(IcprojCodec.encode(composition));
+      expect(result.problems, isEmpty);
+      expect(result.composition, composition);
+      expect((result.composition.findClip('g')!.clip.source as GeneratorRef).reactivity, reactivity);
+
+      final plain =
+          (clipsOf(firstTrack(jsonOf(withGenerator())))[1]! as Map<String, Object?>)['source']! as Map<String, Object?>;
+      expect(plain.containsKey('reactivity'), isFalse);
+
+      generator['reactivity'] = 'loud';
+      final salvaged = IcprojCodec.fromJson(json);
+      expect((salvaged.composition.findClip('g')!.clip.source as GeneratorRef).reactivity, AudioReactivity.none);
+      expect(salvaged.problems.single.kind, IcprojProblemKind.defaultedValue);
+      expect(salvaged.problems.single.path, r'$.tracks[0].clips[1].source.reactivity');
+    });
+
     test('omit audioOriginUs when the generator does not use audio', () {
       final json = jsonOf(withGenerator());
       final generator = (clipsOf(firstTrack(json))[1]! as Map<String, Object?>)['source']! as Map<String, Object?>;
