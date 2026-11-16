@@ -1,3 +1,15 @@
+## 0.14.0
+
+- Depends on `icicles_generators` v0.11.0 (meter in `Tempo`); the `.icproj` `tempo` carries `beatsPerBar`, omitted
+  at 4.
+- Project settings: `Composition.flashLimit` (`FlashLimit.standard` 3/s, a custom ceiling, `FlashLimit.off`),
+  `Composition.sectionSource` (`SectionSource.auto` / `structure` / `energy` / `markers`) and
+  `Composition.physical` (`PhysicalGeometry {icicleSpacingCm, ledPitchCm}`, `pixelAspect`,
+  `PhysicalGeometry.installation`); edits `setFlashLimit`, `setSectionSource`, `setPhysical`. Omitted at their
+  defaults (v1 documents stay byte-identical); any other value forces v2; unreadable values are salvaged.
+- `Compositor.render(…, exactLength: true)`: the animation ends exactly at the timeline (or range) end — the last
+  frame is shown only until then (a remainder shorter than one frame extends the frame before).
+
 ## 0.13.0
 
 - Transition kinds: `TransitionKind {crossfade, wipe, dipToBlack, dipToWhite, push}` and `TransitionDirection {left,

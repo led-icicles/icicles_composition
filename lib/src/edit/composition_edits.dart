@@ -11,6 +11,7 @@ import '../model/macro_def.dart';
 import '../model/marker.dart';
 import '../model/output_spec.dart';
 import '../model/region.dart';
+import '../model/show_settings.dart';
 import '../model/source_ref.dart';
 import '../model/stage_layout.dart';
 import '../model/transition.dart';
@@ -1116,6 +1117,16 @@ extension CompositionEdits on Composition {
 
   /// Sets or (with `null`) removes the beat grid.
   Composition setTempo(Tempo? tempo) => tempo == null ? copyWith(removeTempo: true) : copyWith(tempo: tempo);
+
+  /// What the show checks allow.
+  Composition setFlashLimit(FlashLimit limit) => copyWith(flashLimit: limit);
+
+  /// Where the song's sections come from.
+  Composition setSectionSource(SectionSource source) => copyWith(sectionSource: source);
+
+  /// The installation's physical spacing (`null` = unrecorded).
+  Composition setPhysical(PhysicalGeometry? physical) =>
+      physical == null ? copyWith(removePhysical: true) : copyWith(physical: physical);
 
   // ---------------------------------------------------------------- helpers
 

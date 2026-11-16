@@ -25,6 +25,7 @@ export 'src/model/marker.dart';
 export 'src/model/output_spec.dart';
 export 'src/model/pixel_mask.dart';
 export 'src/model/region.dart';
+export 'src/model/show_settings.dart';
 export 'src/model/source_ref.dart';
 export 'src/model/stage_layout.dart';
 export 'src/model/transition.dart';

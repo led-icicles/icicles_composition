@@ -17,6 +17,7 @@ import '../model/marker.dart';
 import '../model/output_spec.dart';
 import '../model/pixel_mask.dart';
 import '../model/region.dart';
+import '../model/show_settings.dart';
 import '../model/source_ref.dart';
 import '../model/stage_layout.dart';
 import '../model/transition.dart';
@@ -193,6 +194,10 @@ abstract final class IcprojCodec {
     if (composition.macros.isNotEmpty) return currentVersion;
     if (composition.cueTracks.isNotEmpty) return currentVersion;
     if (composition.stageLayout != null) return currentVersion;
+    if (composition.flashLimit != FlashLimit.standard) return currentVersion;
+    if (composition.sectionSource != SectionSource.auto) return currentVersion;
+    if (composition.physical != null) return currentVersion;
+    if (composition.tempo case final tempo? when tempo.beatsPerBar != Tempo.defaultBeatsPerBar) return currentVersion;
     if (composition.tracks.any((track) => track.solo)) return currentVersion;
     if (composition.markers.any((marker) => marker.color != ClipLabel.none)) return currentVersion;
     if (composition.tracks.any((track) => track.transitions.any((transition) => !transition.isClassic))) {
@@ -226,7 +231,11 @@ abstract final class IcprojCodec {
         ],
         if (composition.audio case final audio?) 'audio': _audioToJson(audio),
         if (composition.tempo case final tempo?)
-          'tempo': {'bpm': tempo.bpm, 'firstBeatOffsetUs': tempo.firstBeatOffset.inMicroseconds},
+          'tempo': {
+            'bpm': tempo.bpm,
+            'firstBeatOffsetUs': tempo.firstBeatOffset.inMicroseconds,
+            if (tempo.beatsPerBar != Tempo.defaultBeatsPerBar) 'beatsPerBar': tempo.beatsPerBar,
+          },
         'markers': [
           for (final marker in composition.markers)
             {
@@ -274,6 +283,11 @@ abstract final class IcprojCodec {
             if (layout.grid case final grid?) 'grid': _placementToJson(grid),
             'panels': [for (final panel in layout.panels) _placementToJson(panel)],
           },
+        if (composition.flashLimit != FlashLimit.standard)
+          'flashLimit': composition.flashLimit.maxPerSecond ?? 'off',
+        if (composition.sectionSource != SectionSource.auto) 'sectionSource': composition.sectionSource.name,
+        if (composition.physical case final physical?)
+          'physical': {'icicleSpacingCm': physical.icicleSpacingCm, 'ledPitchCm': physical.ledPitchCm},
       };
 
   static Map<String, Object?> _placementToJson(StagePlacement placement) => {
@@ -669,6 +683,8 @@ class _Decoder {
           tempo = Tempo(
             bpm: fields.clamp('bpm', bpm.toDouble(), Tempo.minBpm, Tempo.maxBpm),
             firstBeatOffset: fields.duration('firstBeatOffsetUs', Duration.zero),
+            beatsPerBar: fields.clamp(
+                'beatsPerBar', fields.optionalInt('beatsPerBar') ?? Tempo.defaultBeatsPerBar, 1, Tempo.maxBeatsPerBar),
           );
         } else {
           throw const _Invalid(r'$.tempo.bpm is missing or not a number.');
@@ -730,6 +746,22 @@ class _Decoder {
       }
     }
 
+    final flashLimit = _flashLimit(json['flashLimit']);
+    final sectionSource = root.enumByName('sectionSource', SectionSource.values, SectionSource.auto);
+    PhysicalGeometry? physical;
+    if (json['physical'] != null) {
+      try {
+        final fields = _Fields.of(json['physical'], r'$.physical', problems);
+        physical = PhysicalGeometry(
+          icicleSpacingCm: fields.number('icicleSpacingCm', 0, min: 0.1, max: 10000),
+          ledPitchCm: fields.number('ledPitchCm', 0, min: 0.1, max: 10000),
+        );
+      } on Object catch (error) {
+        if (error is! ArgumentError && error is! _Invalid) rethrow;
+        problems.add(const IcprojProblem(IcprojProblemKind.defaultedValue, r'$.physical', 'Unreadable, none.'));
+      }
+    }
+
     final composition = Composition(
       name: name,
       target: target,
@@ -742,12 +774,34 @@ class _Decoder {
       macros: macros,
       cueTracks: cueTracks,
       stageLayout: stageLayout,
+      flashLimit: flashLimit,
+      sectionSource: sectionSource,
+      physical: physical,
     );
     return IcprojDecodeResult(composition, problems);
   }
 
   /// A preview layout; an unreadable placement (or a repeated panel index)
   /// is dropped one by one, leaving that object at its default.
+  FlashLimit _flashLimit(Object? value) {
+    switch (value) {
+      case null:
+        return FlashLimit.standard;
+      case 'off':
+        return FlashLimit.off;
+      case final num n when n.isFinite:
+        final clamped = n.round().clamp(1, FlashLimit.maxPerSecondLimit);
+        if (clamped != n) {
+          problems.add(IcprojProblem(IcprojProblemKind.clampedValue, r'$.flashLimit', '$n set to $clamped.'));
+        }
+        return FlashLimit(clamped);
+      default:
+        problems.add(IcprojProblem(
+            IcprojProblemKind.defaultedValue, r'$.flashLimit', '"$value" is unknown, the default is used.'));
+        return FlashLimit.standard;
+    }
+  }
+
   StageLayout _stageLayout(_Fields fields) {
     StagePlacement? placement(Object? value, String path, {required bool grid}) {
       try {

@@ -108,7 +108,9 @@ abstract final class Compositor {
   /// (`loopsCount: 1`), is optimized (additive/delay frames) and uses
   /// 24-bit colors (`useRgb565: false`; the controller reads only frame
   /// types 1, 2, 3, 100 and 101). Its length is the grid time of the frames
-  /// covering the timeline, at most one frame longer than it.
+  /// covering the timeline, at most one frame longer than it — or, with
+  /// [exactLength], exactly the timeline (or [range]) length to the
+  /// millisecond: the last frame is shown only until the end.
   ///
   /// Effect clips run through [effects] frame by frame in timeline order
   /// (see [renderAt]). Offline sources and effects do not block the
@@ -116,17 +118,30 @@ abstract final class Compositor {
   /// pauses the controller may shorten. Throws
   /// [CompositionErrorKind.emptyComposition] when there is nothing to
   /// render.
+  /// How long the last frame (starting at [start], normally [full]) shows so
+  /// the animation ends at [end]: whole milliseconds, never shorter than
+  /// [full] (a short remainder was merged into it, so it may be longer).
+  static Duration _until(Duration start, Duration end, Duration full) {
+    final until = _ms(end - start);
+    return until < full ? full : until;
+  }
+
+  static Duration _ms(Duration d) => Duration(milliseconds: (d.inMicroseconds / 1000).round());
+
   static RenderResult render(
     Composition composition,
     Map<SourceRef, AnimationIndex> sources, {
     Duration? duration,
     LoopRange? range,
     EffectHost? effects,
+    bool exactLength = false,
   }) {
     final framerate = composition.framerate;
     final int firstFrame;
     final int frames;
+    final Duration end;
     if (range != null) {
+      end = range.end;
       firstFrame = frameIndexAt(framerate, range.start);
       frames = frameIndexAt(framerate, range.end - const Duration(microseconds: 1)) - firstFrame + 1;
     } else {
@@ -136,6 +151,7 @@ abstract final class Compositor {
       }
       firstFrame = 0;
       frames = frameCountFor(framerate, length);
+      end = length;
     }
     final target = composition.target;
     final animation = Animation(
@@ -152,10 +168,16 @@ abstract final class Compositor {
     );
     final icicles = Icicles(animation);
     final renderer = _Renderer(composition, sources, effects);
-    for (var index = firstFrame; index < firstFrame + frames; index++) {
+    var last = firstFrame + frames - 1;
+    // A remainder shorter than the shortest frame extends the frame before.
+    if (exactLength && last > firstFrame && _ms(end - framerate.frameStart(last)) < framerate.minFrameDuration) {
+      last--;
+    }
+    for (var index = firstFrame; index <= last; index++) {
+      final start = framerate.frameStart(index);
       final frameDuration = framerate.frameDuration(index);
-      icicles.setView(renderer.viewAt(framerate.frameStart(index), frameDuration));
-      icicles.show(frameDuration);
+      icicles.setView(renderer.viewAt(start, frameDuration));
+      icicles.show(exactLength && index == last ? _until(start, end, frameDuration) : frameDuration);
     }
 
     final warnings = <RenderWarning>[];

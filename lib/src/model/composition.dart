@@ -10,6 +10,7 @@ import 'loop_range.dart';
 import 'macro_def.dart';
 import 'marker.dart';
 import 'output_spec.dart';
+import 'show_settings.dart';
 import 'source_ref.dart';
 import 'stage_layout.dart';
 import 'visual_track.dart';
@@ -57,6 +58,16 @@ class Composition extends Equatable {
   /// ignores it.
   final StageLayout? stageLayout;
 
+  /// What the show checks allow ([FlashLimit.standard] by default).
+  final FlashLimit flashLimit;
+
+  /// Where the song's sections come from.
+  final SectionSource sectionSource;
+
+  /// The installation's physical spacing, `null` when the project does not
+  /// record one (the application assumes its default installation).
+  final PhysicalGeometry? physical;
+
   /// Throws an [ArgumentError] for an unsupported [framerate], a name with
   /// the NUL character or repeated track, clip, marker, macro or cue track
   /// ids (clip ids are unique across tracks).
@@ -72,6 +83,9 @@ class Composition extends Equatable {
     List<MacroDef> macros = const [],
     List<CueTrack> cueTracks = const [],
     this.stageLayout,
+    this.flashLimit = FlashLimit.standard,
+    this.sectionSource = SectionSource.auto,
+    this.physical,
   })  : tracks = List.unmodifiable(tracks),
         markers = List.unmodifiable(markers.sorted((a, b) => a.at.compareTo(b.at))),
         macros = List.unmodifiable(macros),
@@ -163,7 +177,8 @@ class Composition extends Equatable {
   bool isTrackAudible(VisualTrack track) => !track.muted && (!hasSolo || track.solo);
 
   /// A copy with the given fields replaced; [removeAudio], [removeTempo] and
-  /// [removeLoopRange] and [removeStageLayout] set them to `null`.
+  /// [removeLoopRange], [removeStageLayout] and [removePhysical] set them to
+  /// `null`.
   Composition copyWith({
     String? name,
     OutputSpec? target,
@@ -180,6 +195,10 @@ class Composition extends Equatable {
     List<CueTrack>? cueTracks,
     StageLayout? stageLayout,
     bool removeStageLayout = false,
+    FlashLimit? flashLimit,
+    SectionSource? sectionSource,
+    PhysicalGeometry? physical,
+    bool removePhysical = false,
   }) =>
       Composition(
         name: name ?? this.name,
@@ -193,9 +212,26 @@ class Composition extends Equatable {
         macros: macros ?? this.macros,
         cueTracks: cueTracks ?? this.cueTracks,
         stageLayout: removeStageLayout ? null : (stageLayout ?? this.stageLayout),
+        flashLimit: flashLimit ?? this.flashLimit,
+        sectionSource: sectionSource ?? this.sectionSource,
+        physical: removePhysical ? null : (physical ?? this.physical),
       );
 
   @override
-  List<Object?> get props =>
-      [name, target, framerate, tracks, audio, tempo, markers, loopRange, macros, cueTracks, stageLayout];
+  List<Object?> get props => [
+        name,
+        target,
+        framerate,
+        tracks,
+        audio,
+        tempo,
+        markers,
+        loopRange,
+        macros,
+        cueTracks,
+        stageLayout,
+        flashLimit,
+        sectionSource,
+        physical,
+      ];
 }
