@@ -326,6 +326,8 @@ extension CompositionEdits on Composition {
             toClipId: transition.toClipId,
             duration: transition.duration,
             alignment: transition.alignment,
+            kind: transition.kind,
+            direction: transition.direction,
           )
         else
           transition,
@@ -687,9 +689,11 @@ extension CompositionEdits on Composition {
 
   // ----------------------------------------------------------- transitions
 
-  /// Adds a crossfade between two adjacent clips of one track; its duration
-  /// is clamped to the limit of [fitTransitions].
-  Composition addTransition(Transition transition) {
+  /// Adds a transition between two adjacent clips of one track; its duration
+  /// is clamped to the limit of [fitTransitions]. [kind] and [direction],
+  /// when given, replace the transition's own.
+  Composition addTransition(Transition transition, {TransitionKind? kind, TransitionDirection? direction}) {
+    if (kind != null || direction != null) transition = transition.copyWith(kind: kind, direction: direction);
     final placed = findClip(transition.fromClipId);
     if (placed == null) {
       throw CompositionException(CompositionErrorKind.clipNotFound, 'Clip "${transition.fromClipId}" not found.');
@@ -724,10 +728,18 @@ extension CompositionEdits on Composition {
   }
 
   /// Changes a transition; the duration is clamped like in [addTransition].
-  Composition updateTransition(String transitionId, {Duration? duration, TransitionAlignment? alignment}) {
+  Composition updateTransition(
+    String transitionId, {
+    Duration? duration,
+    TransitionAlignment? alignment,
+    TransitionKind? kind,
+    TransitionDirection? direction,
+  }) {
     final (track, transition) = _transition(transitionId);
     if (track.locked) throw CompositionException(CompositionErrorKind.trackLocked, 'Track "${track.id}" is locked.');
-    final updated = _guard(() => transition.copyWith(duration: duration, alignment: alignment));
+    final updated = _guard(
+      () => transition.copyWith(duration: duration, alignment: alignment, kind: kind, direction: direction),
+    );
     return _replaceClips(track, track.clips, transitions: [
       for (final other in track.transitions) other.id == transitionId ? updated : other,
     ]);

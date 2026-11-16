@@ -1,3 +1,15 @@
+## 0.13.0
+
+- Transition kinds: `TransitionKind {crossfade, wipe, dipToBlack, dipToWhite, push}` and `TransitionDirection {left,
+  right, up, down, center}` (the side the incoming clip enters from; push treats `center` as `left`) on `Transition`
+  (`kind`, `direction`, `isClassic`). The codec writes them only when not the default; any non-classic transition
+  forces v2 (crossfade documents stay byte-identical v1); unreadable values are salvaged with `defaultedValue`.
+  `addTransition` / `updateTransition` take `kind` and `direction`; a split keeps them.
+- `Compositor`: wipe (soft per-pixel edge; panels at their proportional position), dip through black / white
+  (midpoint fully dark / white), push (whole icicles or LEDs); crossfade unchanged.
+- Depends on `icicles_generators` 0.10.0: projects carry the stem / harmony keys, `musical` bindings and the
+  reactivity's `stem` / `level` through its JSON.
+
 ## 0.12.0
 
 - Preview layout of a project: `StageLayout {name, grid?, panels}` of `StagePlacement {index, cx, cy, width, height,

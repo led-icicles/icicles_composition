@@ -624,4 +624,68 @@ void main() {
       expect(result.problems.single.path, r'$.tracks[0].clips[0].mask');
     });
   });
+
+  group('transition kinds', () {
+    Composition withTransition(Transition transition) {
+      final base = fullComposition();
+      return base.copyWith(tracks: [
+        base.tracks.first.copyWith(transitions: [transition]),
+        ...base.tracks.skip(1),
+      ]);
+    }
+
+    Transition transitionOf(Composition composition) => composition.tracks.first.transitions.single;
+
+    test('a crossfade keeps the version 1 bytes without kind or direction', () {
+      final json = jsonOf(fullComposition());
+      expect(json['version'], 1);
+      final transition = (firstTrack(json)['transitions']! as List<Object?>).single! as Map<String, Object?>;
+      expect(transition.containsKey('kind'), isFalse);
+      expect(transition.containsKey('direction'), isFalse);
+    });
+
+    for (final kind in TransitionKind.values) {
+      for (final direction in TransitionDirection.values) {
+        if (kind == TransitionKind.crossfade && direction == TransitionDirection.left) continue;
+        test('${kind.name} ${direction.name} round-trips as version 2', () {
+          final composition = withTransition(Transition(
+              id: 'x',
+              fromClipId: 'a',
+              toClipId: 'b',
+              duration: ms(500),
+              alignment: TransitionAlignment.endAtCut,
+              kind: kind,
+              direction: direction));
+          final json = jsonOf(composition);
+          expect(json['version'], 2);
+          final stored = (firstTrack(json)['transitions']! as List<Object?>).single! as Map<String, Object?>;
+          expect(stored['kind'], kind == TransitionKind.crossfade ? isNull : kind.name);
+          expect(stored['direction'], direction == TransitionDirection.left ? isNull : direction.name);
+          final result = IcprojCodec.decode(IcprojCodec.encode(composition));
+          expect(result.problems, isEmpty);
+          expect(result.composition, composition);
+        });
+      }
+    }
+
+    test('an unreadable kind or direction falls back to the default', () {
+      final json = jsonOf(withTransition(Transition(
+          id: 'x',
+          fromClipId: 'a',
+          toClipId: 'b',
+          duration: ms(500),
+          kind: TransitionKind.wipe,
+          direction: TransitionDirection.up)));
+      final stored = (firstTrack(json)['transitions']! as List<Object?>).single! as Map<String, Object?>;
+      stored['kind'] = 'spiral';
+      stored['direction'] = 7;
+      final result = IcprojCodec.fromJson(json);
+      final transition = transitionOf(result.composition);
+      expect((transition.kind, transition.direction), (TransitionKind.crossfade, TransitionDirection.left));
+      expect(result.problems.map((problem) => problem.kind),
+          [IcprojProblemKind.defaultedValue, IcprojProblemKind.defaultedValue]);
+      expect(result.problems.map((problem) => problem.path),
+          [r'$.tracks[0].transitions[0].kind', r'$.tracks[0].transitions[0].direction']);
+    });
+  });
 }

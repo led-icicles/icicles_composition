@@ -158,7 +158,9 @@ class IcprojDecodeResult {
 ///   `"stageLayout": {"name", "grid"?, "panels": [...]}` (placements
 ///   `{"index", "cx", "cy", "w", "h", "rot", "shape"}`, the grid at index 0;
 ///   an unreadable placement is dropped, so that object keeps the
-///   application's default). Any of them being set
+///   application's default), and a transition `"kind"` (a [TransitionKind]
+///   name, default `crossfade`) and `"direction"` (a [TransitionDirection]
+///   name, default `left`). Any of them being set
 ///   makes the document version 2; a document without them keeps its
 ///   version 1 bytes.
 /// - Decoding is strict about the format and version but salvages the rest:
@@ -183,7 +185,7 @@ abstract final class IcprojCodec {
   /// The `version` [composition] is written as: 1 with file clips only (no
   /// generator, effect, image, drawing or nested-composition clips), without
   /// mask, reversed, ping-pong or labelled clips, solo tracks,
-  /// colored markers, macros or a loop range, and with classic regions only
+  /// colored markers, macros, a loop range or non-crossfade transitions, and with classic regions only
   /// ([Region.isClassic]); [currentVersion] otherwise.
   static int versionFor(Composition composition) {
     if (composition.loopRange != null) return currentVersion;
@@ -193,6 +195,9 @@ abstract final class IcprojCodec {
     if (composition.stageLayout != null) return currentVersion;
     if (composition.tracks.any((track) => track.solo)) return currentVersion;
     if (composition.markers.any((marker) => marker.color != ClipLabel.none)) return currentVersion;
+    if (composition.tracks.any((track) => track.transitions.any((transition) => !transition.isClassic))) {
+      return currentVersion;
+    }
     final needsV2 = composition.placedClips.any((placed) {
       final clip = placed.clip;
       return clip.source is! AnimationFileRef ||
@@ -378,6 +383,8 @@ Map<String, Object?> _trackToJson(VisualTrack track, {required bool legacy}) => 
             'toClipId': transition.toClipId,
             'durationUs': transition.duration.inMicroseconds,
             'alignment': transition.alignment.name,
+            if (transition.kind != TransitionKind.crossfade) 'kind': transition.kind.name,
+            if (transition.direction != TransitionDirection.left) 'direction': transition.direction.name,
           },
       ],
     };
@@ -988,6 +995,8 @@ class _Decoder {
           toClipId: transitionFields.requiredString('toClipId'),
           duration: transitionFields.requiredDuration('durationUs'),
           alignment: transitionFields.enumByName('alignment', TransitionAlignment.values, TransitionAlignment.center),
+          kind: transitionFields.enumByName('kind', TransitionKind.values, TransitionKind.crossfade),
+          direction: transitionFields.enumByName('direction', TransitionDirection.values, TransitionDirection.left),
         );
         if (!_transitionIds.add(transition.id)) throw _Invalid('Duplicate transition id "${transition.id}".');
         transitions.add(transition);

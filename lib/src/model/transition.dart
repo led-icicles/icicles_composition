@@ -12,7 +12,38 @@ enum TransitionAlignment {
   endAtCut,
 }
 
-/// An explicit crossfade between two adjacent clips on one track.
+/// How a [Transition] blends its two clips; see the Compositor for the exact
+/// pixel rules.
+enum TransitionKind {
+  /// The outgoing clip fades out while the incoming one fades in.
+  crossfade,
+
+  /// A soft-edged edge moves across the stage in [TransitionDirection],
+  /// revealing the incoming clip behind it.
+  wipe,
+
+  /// The outgoing clip fades to black in the first half, the incoming one
+  /// fades in from black in the second.
+  dipToBlack,
+
+  /// Like [dipToBlack] through white.
+  dipToWhite,
+
+  /// The incoming clip slides in from [TransitionDirection], pushing the
+  /// outgoing one out.
+  push,
+}
+
+/// The side a [TransitionKind.wipe] or [TransitionKind.push] starts from:
+/// the incoming clip enters from there.
+///
+/// [left] is icicle 0 (the motion goes towards the last icicle), [right]
+/// the last icicle, [up] the top of the icicles (LED 0, the motion goes
+/// down), [down] their bottom. [center] wipes from the middle icicle
+/// outward; a push treats it as [left].
+enum TransitionDirection { left, right, up, down, center }
+
+/// An explicit transition between two adjacent clips on one track.
 ///
 /// Around the cut the outgoing clip ([fromClipId]) is extended past its end
 /// and the incoming clip ([toClipId]) before its start; where a clip has no
@@ -27,10 +58,15 @@ class Transition extends Equatable {
   /// The later (incoming) clip, directly after [fromClipId].
   final String toClipId;
 
-  /// Length of the crossfade, positive.
+  /// Length of the transition, positive.
   final Duration duration;
 
   final TransitionAlignment alignment;
+
+  final TransitionKind kind;
+
+  /// Used by [TransitionKind.wipe] and [TransitionKind.push] only.
+  final TransitionDirection direction;
 
   Transition({
     required this.id,
@@ -38,6 +74,8 @@ class Transition extends Equatable {
     required this.toClipId,
     required this.duration,
     this.alignment = TransitionAlignment.center,
+    this.kind = TransitionKind.crossfade,
+    this.direction = TransitionDirection.left,
   }) {
     if (id.isEmpty) throw ArgumentError.value(id, 'id', 'Must not be empty.');
     if (fromClipId == toClipId) {
@@ -59,14 +97,25 @@ class Transition extends Equatable {
         TransitionAlignment.endAtCut => duration,
       };
 
-  Transition copyWith({Duration? duration, TransitionAlignment? alignment}) => Transition(
+  /// Whether this is a plain crossfade as stored by version 1 documents.
+  bool get isClassic => kind == TransitionKind.crossfade && direction == TransitionDirection.left;
+
+  Transition copyWith({
+    Duration? duration,
+    TransitionAlignment? alignment,
+    TransitionKind? kind,
+    TransitionDirection? direction,
+  }) =>
+      Transition(
         id: id,
         fromClipId: fromClipId,
         toClipId: toClipId,
         duration: duration ?? this.duration,
         alignment: alignment ?? this.alignment,
+        kind: kind ?? this.kind,
+        direction: direction ?? this.direction,
       );
 
   @override
-  List<Object?> get props => [id, fromClipId, toClipId, duration, alignment];
+  List<Object?> get props => [id, fromClipId, toClipId, duration, alignment, kind, direction];
 }

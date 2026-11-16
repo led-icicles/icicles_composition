@@ -369,6 +369,36 @@ void main() {
       expect(updated.removeTransition('x').trackById('t')!.transitions, isEmpty);
     });
 
+    test('take a kind and a direction on add and update', () {
+      final added = composition.addTransition(
+        Transition(id: 'x', fromClipId: 'a', toClipId: 'b', duration: ms(400)),
+        kind: TransitionKind.wipe,
+        direction: TransitionDirection.center,
+      );
+      final transition = added.trackById('t')!.transitionById('x')!;
+      expect((transition.kind, transition.direction), (TransitionKind.wipe, TransitionDirection.center));
+      final updated = added.updateTransition('x', kind: TransitionKind.push);
+      final pushed = updated.trackById('t')!.transitionById('x')!;
+      expect(
+          (pushed.kind, pushed.direction, pushed.duration), (TransitionKind.push, TransitionDirection.center, ms(400)));
+      final dipped = updated.updateTransition('x', kind: TransitionKind.dipToWhite, direction: TransitionDirection.up);
+      expect(dipped.trackById('t')!.transitionById('x')!.kind, TransitionKind.dipToWhite);
+      expect(dipped.trackById('t')!.transitionById('x')!.direction, TransitionDirection.up);
+    });
+
+    test('keep their kind and direction when the outgoing clip is split', () {
+      final added = composition.addTransition(Transition(
+          id: 'x',
+          fromClipId: 'a',
+          toClipId: 'b',
+          duration: ms(400),
+          kind: TransitionKind.push,
+          direction: TransitionDirection.down));
+      final transition = added.splitClip('a', s(1), newClipId: 'r').trackById('t')!.transitionById('x')!;
+      expect((transition.fromClipId, transition.kind, transition.direction),
+          ('r', TransitionKind.push, TransitionDirection.down));
+    });
+
     test('need adjacent clips', () {
       expect(
         () => composition.addTransition(Transition(id: 'x', fromClipId: 'b', toClipId: 'c', duration: ms(100))),
