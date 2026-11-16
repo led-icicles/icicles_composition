@@ -97,12 +97,17 @@ sealed class ParametricRef extends SourceRef {
   /// with an active reactivity is audio-bound ([audioOrigin] set).
   final AudioReactivity reactivity;
 
+  /// The id of the cue track the clip's cue triggers fire on; `null` = the
+  /// composition's first cue track (see `Composition.cueTrackFor`).
+  final String? cueTrackId;
+
   ParametricRef({
     required Map<String, ParamBinding> bindings,
     required this.seed,
     required this.length,
     required this.audioOrigin,
     this.reactivity = AudioReactivity.none,
+    this.cueTrackId,
   }) : bindings = Map.unmodifiable(bindings) {
     if (length <= Duration.zero || length > maxBakeLength) {
       throw ArgumentError.value(length, 'length', 'Must be positive and at most $maxBakeLength.');
@@ -112,8 +117,8 @@ sealed class ParametricRef extends SourceRef {
   /// Whether the program reads the audio clock, i.e. [audioOrigin] is set.
   bool get usesAudio => audioOrigin != null;
 
-  /// A copy with the given fields replaced; [removeAudioOrigin] sets
-  /// [audioOrigin] to `null`.
+  /// A copy with the given fields replaced; [removeAudioOrigin] /
+  /// [removeCueTrackId] set [audioOrigin] / [cueTrackId] to `null`.
   ParametricRef copyWith({
     Map<String, ParamBinding>? bindings,
     int? seed,
@@ -121,6 +126,8 @@ sealed class ParametricRef extends SourceRef {
     Duration? audioOrigin,
     bool removeAudioOrigin = false,
     AudioReactivity? reactivity,
+    String? cueTrackId,
+    bool removeCueTrackId = false,
   });
 
   @override
@@ -134,6 +141,7 @@ sealed class ParametricRef extends SourceRef {
         length,
         audioOrigin,
         reactivity,
+        cueTrackId,
         // Map contents in a stable order, so equal bindings compare equal.
         for (final key in bindings.keys.toList()..sort()) (key, bindings[key]),
       ];
@@ -160,6 +168,7 @@ final class GeneratorRef extends ParametricRef {
     required super.length,
     super.audioOrigin,
     super.reactivity,
+    super.cueTrackId,
   }) {
     if (generatorId.isEmpty) {
       throw ArgumentError.value(generatorId, 'generatorId', 'Must not be empty.');
@@ -185,6 +194,8 @@ final class GeneratorRef extends ParametricRef {
     Duration? audioOrigin,
     bool removeAudioOrigin = false,
     AudioReactivity? reactivity,
+    String? cueTrackId,
+    bool removeCueTrackId = false,
   }) =>
       GeneratorRef(
         generatorId: generatorId ?? this.generatorId,
@@ -194,6 +205,7 @@ final class GeneratorRef extends ParametricRef {
         length: length ?? this.length,
         audioOrigin: removeAudioOrigin ? null : (audioOrigin ?? this.audioOrigin),
         reactivity: reactivity ?? this.reactivity,
+        cueTrackId: removeCueTrackId ? null : (cueTrackId ?? this.cueTrackId),
       );
 
   @override
@@ -225,6 +237,7 @@ final class EffectRef extends ParametricRef {
     required super.length,
     super.audioOrigin,
     super.reactivity,
+    super.cueTrackId,
   }) {
     if (effectId.isEmpty) {
       throw ArgumentError.value(effectId, 'effectId', 'Must not be empty.');
@@ -250,6 +263,8 @@ final class EffectRef extends ParametricRef {
     Duration? audioOrigin,
     bool removeAudioOrigin = false,
     AudioReactivity? reactivity,
+    String? cueTrackId,
+    bool removeCueTrackId = false,
   }) =>
       EffectRef(
         effectId: effectId ?? this.effectId,
@@ -259,6 +274,7 @@ final class EffectRef extends ParametricRef {
         length: length ?? this.length,
         audioOrigin: removeAudioOrigin ? null : (audioOrigin ?? this.audioOrigin),
         reactivity: reactivity ?? this.reactivity,
+        cueTrackId: removeCueTrackId ? null : (cueTrackId ?? this.cueTrackId),
       );
 
   @override

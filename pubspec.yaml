@@ -3,7 +3,7 @@ description: >-
   Timeline compositions of icicles animations: the composition model, pure
   edit operations, the .icproj project codec and the compositor that renders
   a composition into a single .anim animation.
-version: 0.10.1
+version: 0.11.0
 publish_to: "none"
 repository: https://github.com/led-icicles/icicles_composition
 
@@ -20,7 +20,7 @@ dependencies:
   icicles_generators:
     git:
       url: git@github.com:led-icicles/icicles_generators.git
-      ref: v0.8.0
+      ref: v0.9.0
 
 dev_dependencies:
   lints: ^6.1.0

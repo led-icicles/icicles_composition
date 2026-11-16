@@ -18,6 +18,7 @@ export 'src/model/audio_track.dart';
 export 'src/model/clip.dart';
 export 'src/model/clip_label.dart';
 export 'src/model/composition.dart';
+export 'src/model/cue_track.dart';
 export 'src/model/loop_range.dart';
 export 'src/model/macro_def.dart';
 export 'src/model/marker.dart';

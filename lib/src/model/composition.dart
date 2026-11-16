@@ -5,6 +5,7 @@ import 'package:icicles_generators/icicles_generators.dart';
 
 import 'audio_track.dart';
 import 'clip.dart';
+import 'cue_track.dart';
 import 'loop_range.dart';
 import 'macro_def.dart';
 import 'marker.dart';
@@ -46,9 +47,13 @@ class Composition extends Equatable {
   /// `MacroBinding`), in definition order.
   final List<MacroDef> macros;
 
+  /// The cue tracks (timing tracks of marks that cue triggers fire on), in
+  /// display order.
+  final List<CueTrack> cueTracks;
+
   /// Throws an [ArgumentError] for an unsupported [framerate], a name with
-  /// the NUL character or repeated track, clip, marker or macro ids (clip
-  /// ids are unique across tracks).
+  /// the NUL character or repeated track, clip, marker, macro or cue track
+  /// ids (clip ids are unique across tracks).
   Composition({
     required this.name,
     required this.target,
@@ -59,9 +64,11 @@ class Composition extends Equatable {
     List<Marker> markers = const [],
     this.loopRange,
     List<MacroDef> macros = const [],
+    List<CueTrack> cueTracks = const [],
   })  : tracks = List.unmodifiable(tracks),
         markers = List.unmodifiable(markers.sorted((a, b) => a.at.compareTo(b.at))),
-        macros = List.unmodifiable(macros) {
+        macros = List.unmodifiable(macros),
+        cueTracks = List.unmodifiable(cueTracks) {
     if (name.contains('\u0000')) {
       throw ArgumentError.value(name, 'name', 'Must not contain the NUL character.');
     }
@@ -83,6 +90,10 @@ class Composition extends Equatable {
     final macroIds = <String>{};
     for (final macro in this.macros) {
       if (!macroIds.add(macro.id)) throw ArgumentError('Duplicate macro id "${macro.id}".');
+    }
+    final cueTrackIds = <String>{};
+    for (final track in this.cueTracks) {
+      if (!cueTrackIds.add(track.id)) throw ArgumentError('Duplicate cue track id "${track.id}".');
     }
   }
 
@@ -115,6 +126,13 @@ class Composition extends Equatable {
   Marker? markerById(String markerId) => markers.firstWhereOrNull((marker) => marker.id == markerId);
 
   MacroDef? macroById(String macroId) => macros.firstWhereOrNull((macro) => macro.id == macroId);
+
+  CueTrack? cueTrackById(String cueTrackId) => cueTracks.firstWhereOrNull((track) => track.id == cueTrackId);
+
+  /// The cue track [ref] fires on: its `cueTrackId` when that track exists,
+  /// else the first cue track; `null` without cue tracks.
+  CueTrack? cueTrackFor(ParametricRef ref) =>
+      (ref.cueTrackId == null ? null : cueTrackById(ref.cueTrackId!)) ?? cueTracks.firstOrNull;
 
   /// Every macro's binding by id: what a bake takes as `BakeRequest.macros`.
   Map<String, ParamBinding> get macroBindings => {for (final macro in macros) macro.id: macro.binding};
@@ -152,6 +170,7 @@ class Composition extends Equatable {
     LoopRange? loopRange,
     bool removeLoopRange = false,
     List<MacroDef>? macros,
+    List<CueTrack>? cueTracks,
   }) =>
       Composition(
         name: name ?? this.name,
@@ -163,8 +182,9 @@ class Composition extends Equatable {
         markers: markers ?? this.markers,
         loopRange: removeLoopRange ? null : (loopRange ?? this.loopRange),
         macros: macros ?? this.macros,
+        cueTracks: cueTracks ?? this.cueTracks,
       );
 
   @override
-  List<Object?> get props => [name, target, framerate, tracks, audio, tempo, markers, loopRange, macros];
+  List<Object?> get props => [name, target, framerate, tracks, audio, tempo, markers, loopRange, macros, cueTracks];
 }

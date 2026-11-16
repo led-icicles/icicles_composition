@@ -10,6 +10,7 @@ import '../model/audio_track.dart';
 import '../model/clip.dart';
 import '../model/clip_label.dart';
 import '../model/composition.dart';
+import '../model/cue_track.dart';
 import '../model/loop_range.dart';
 import '../model/macro_def.dart';
 import '../model/marker.dart';
@@ -61,6 +62,14 @@ enum IcprojProblemKind {
   /// A macro definition was unreadable and was dropped; parameters reading
   /// it fall back to their defaults.
   droppedMacro,
+
+  /// A cue track was unreadable and was dropped; clips naming it follow the
+  /// first remaining cue track.
+  droppedCueTrack,
+
+  /// A cue of a cue track was unreadable (or repeated an id) and was
+  /// dropped.
+  droppedCue,
   droppedAudio,
   droppedTempo,
 
@@ -141,8 +150,12 @@ class IcprojDecodeResult {
 ///   `"loopRange": {"startUs", "endUs"}`, and the composition `"macros"`:
 ///   `[{"id", "name", "kind": "number" | "color", "min", "max", "default"
 ///   (number) | "defaultColor" (color), "binding"}]` (the binding in the
-///   [ParamBindingJson] form). Any of them being set makes the document
-///   version 2; a document without them keeps its version 1 bytes.
+///   [ParamBindingJson] form), and the composition `"cueTracks"`: `[{"id",
+///   "name", "color"?, "cues": {"ids": [], "us": [], "s": []}}]` (cue ids,
+///   timeline microseconds and strengths, column-wise) with a generator or
+///   effect source naming its track in `"cueTrack"`. Any of them being set
+///   makes the document version 2; a document without them keeps its
+///   version 1 bytes.
 /// - Decoding is strict about the format and version but salvages the rest:
 ///   an invalid track, clip, transition or marker is dropped, numbers are
 ///   clamped to their ranges and unknown values replaced by defaults, each
@@ -171,6 +184,7 @@ abstract final class IcprojCodec {
     if (composition.loopRange != null) return currentVersion;
     if (composition.audio case final audio? when !audio.isSingleWhole) return currentVersion;
     if (composition.macros.isNotEmpty) return currentVersion;
+    if (composition.cueTracks.isNotEmpty) return currentVersion;
     if (composition.tracks.any((track) => track.solo)) return currentVersion;
     if (composition.markers.any((marker) => marker.color != ClipLabel.none)) return currentVersion;
     final needsV2 = composition.placedClips.any((placed) {
@@ -227,6 +241,20 @@ abstract final class IcprojCodec {
                 } else
                   'defaultColor': colorToHex(macro.defaultValue as Color),
                 'binding': ParamBindingJson.toJson(macro.binding),
+              },
+          ],
+        if (composition.cueTracks.isNotEmpty)
+          'cueTracks': [
+            for (final track in composition.cueTracks)
+              {
+                'id': track.id,
+                'name': track.name,
+                if (track.color != ClipLabel.none) 'color': track.color.name,
+                'cues': {
+                  'ids': [for (final cue in track.cues) cue.id],
+                  'us': [for (final cue in track.cues) cue.at.inMicroseconds],
+                  's': [for (final cue in track.cues) cue.strength],
+                },
               },
           ],
       };
@@ -379,6 +407,7 @@ Map<String, Object?> _parametricToJson(String type, ParametricRef source) => {
       if (source.audioOrigin case final origin?) 'audioOriginUs': origin.inMicroseconds,
       'params': ParamBindingJson.bindingsToJson(source.bindings),
       if (source.reactivity != AudioReactivity.none) 'reactivity': AudioReactivityJson.toJson(source.reactivity),
+      if (source.cueTrackId case final cueTrack?) 'cueTrack': cueTrack,
     };
 
 Map<String, Object?> _clipToJson(Clip clip, {required bool legacy}) => {
@@ -648,6 +677,21 @@ class _Decoder {
       }
     }
 
+    final cueTracks = <CueTrack>[];
+    final cueTrackIds = <String>{};
+    for (final (index, value) in root.list('cueTracks').indexed) {
+      final path = r'$.cueTracks' '[$index]';
+      try {
+        final track = _cueTrack(_Fields.of(value, path, problems), problems);
+        if (!cueTrackIds.add(track.id)) throw _Invalid('Duplicate cue track id "${track.id}".');
+        cueTracks.add(track);
+      } on _Invalid catch (error) {
+        problems.add(IcprojProblem(IcprojProblemKind.droppedCueTrack, path, error.message));
+      } on ArgumentError catch (error) {
+        problems.add(IcprojProblem(IcprojProblemKind.droppedCueTrack, path, '${error.message}'));
+      }
+    }
+
     final composition = Composition(
       name: name,
       target: target,
@@ -658,8 +702,46 @@ class _Decoder {
       markers: markers,
       loopRange: loopRange,
       macros: macros,
+      cueTracks: cueTracks,
     );
     return IcprojDecodeResult(composition, problems);
+  }
+
+  /// A cue track; unreadable cues (a missing or negative time, a strength
+  /// outside `0..1` is clamped, a repeated id) are dropped one by one.
+  static CueTrack _cueTrack(_Fields fields, List<IcprojProblem> problems) {
+    final id = fields.requiredString('id');
+    final cues = <Cue>[];
+    final raw = fields.json['cues'];
+    if (raw is Map<String, Object?>) {
+      final ids = raw['ids'];
+      final us = raw['us'];
+      final s = raw['s'];
+      if (ids is! List || us is! List || s is! List || ids.length != us.length || us.length != s.length) {
+        problems.add(IcprojProblem(IcprojProblemKind.droppedCue, '${fields.path}.cues', 'Columns are unreadable.'));
+      } else {
+        final seen = <String>{};
+        for (var i = 0; i < ids.length; i++) {
+          final cueId = ids[i];
+          final at = us[i];
+          final strength = s[i];
+          if (cueId is! String || cueId.isEmpty || !seen.add(cueId) || at is! int || at < 0 || strength is! num) {
+            problems.add(IcprojProblem(IcprojProblemKind.droppedCue, '${fields.path}.cues[$i]', 'Unreadable cue.'));
+            continue;
+          }
+          final clamped = strength.isFinite ? strength.toDouble().clamp(0.0, 1.0) : 1.0;
+          cues.add(Cue(id: cueId, at: Duration(microseconds: at), strength: clamped));
+        }
+      }
+    } else if (raw != null) {
+      fields._defaulted('cues', 'not an object');
+    }
+    return CueTrack(
+      id: id,
+      name: fields.string('name', ''),
+      color: fields.enumByName('color', ClipLabel.values, ClipLabel.none),
+      cues: cues,
+    );
   }
 
   /// The soundtrack: the version 1 `offsetUs` becomes one open-ended
@@ -1053,6 +1135,9 @@ class _Decoder {
           microseconds: fields.clamp('lengthUs', fields.requiredInt('lengthUs'), 1, maxBakeLength.inMicroseconds),
         );
         final audioOrigin = origin == null ? null : Duration(microseconds: origin);
+        final cueTrack = fields.json['cueTrack'];
+        final cueTrackId = cueTrack is String && cueTrack.isNotEmpty ? cueTrack : null;
+        if (cueTrack != null && cueTrackId == null) fields._defaulted('cueTrack', 'not a cue track id');
         if (type == 'effect') {
           return EffectRef(
             effectId: id,
@@ -1062,6 +1147,7 @@ class _Decoder {
             length: length,
             audioOrigin: audioOrigin,
             reactivity: reactivity,
+            cueTrackId: cueTrackId,
           );
         }
         return GeneratorRef(
@@ -1072,6 +1158,7 @@ class _Decoder {
           length: length,
           audioOrigin: audioOrigin,
           reactivity: reactivity,
+          cueTrackId: cueTrackId,
         );
       default:
         throw _Invalid('${fields.path}.type "$type" is unknown.');

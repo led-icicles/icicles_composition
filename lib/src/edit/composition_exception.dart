@@ -6,6 +6,8 @@ enum CompositionErrorKind {
   markerNotFound,
   macroNotFound,
   audioSegmentNotFound,
+  cueTrackNotFound,
+  cueNotFound,
 
   /// The id is already used in the composition.
   duplicateId,

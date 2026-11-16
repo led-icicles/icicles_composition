@@ -1,3 +1,19 @@
+## 0.11.0
+
+- Cue tracks (timing tracks of user-placed marks that cue triggers fire on): `Cue {id, at, strength}`,
+  `CueTrack {id, name, color, cues}` (sorted; `hits(offset:)` gives the `CueHits` of a bake),
+  `Composition.cueTracks`, `cueTrackById`, `cueTrackFor(ref)` (the ref's `cueTrackId`, else the first track).
+- `ParametricRef.cueTrackId` (`GeneratorRef` / `EffectRef`, `copyWith(cueTrackId:, removeCueTrackId:)`, part of
+  equality).
+- Edits: `addCueTrack`, `updateCueTrack`, `removeCueTrack` (clears the clip references), `addCues`, `replaceCues`,
+  `moveCues` (clamped together at 0), `setCueStrength`, `removeCues`, `setCueTrack(clipId, id, {audioBound})`; new
+  `CompositionErrorKind.cueTrackNotFound` / `cueNotFound`.
+- `.icproj` version 2: `"cueTracks": [{id, name, color?, cues: {ids, us, s}}]` and a source's `"cueTrack"`;
+  unreadable entries are dropped (`IcprojProblemKind.droppedCueTrack` / `droppedCue`).
+- `Snapper` snaps to cues (`SnapTargetKind.cue`, `cues`, `ignoreCueIds`); `SnapTargetKind.audioHit` labels
+  host-added targets (detected drum hits).
+- Depends on `icicles_generators` 0.9.0.
+
 ## 0.10.1
 
 - Depends on `icicles_generators` 0.8.0: `.icproj` documents round-trip the new drum triggers unchanged — the

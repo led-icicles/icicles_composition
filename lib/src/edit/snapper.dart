@@ -3,7 +3,9 @@ import 'package:equatable/equatable.dart';
 import '../model/composition.dart';
 
 /// What a time snapped to, in priority order for equally near targets.
-enum SnapTargetKind { playhead, clipEdge, marker, beat }
+/// [audioHit] is never produced by [Snapper]: it labels the detected audio
+/// events (e.g. drum hits) a host adds as targets of its own.
+enum SnapTargetKind { playhead, clipEdge, marker, cue, beat, audioHit }
 
 /// A snapped time.
 class SnapResult extends Equatable {
@@ -36,7 +38,8 @@ class SpanSnapResult extends Equatable {
   List<Object?> get props => [start, snap, snappedEnd];
 }
 
-/// Snaps times to beats, clip edges, the playhead and markers within
+/// Snaps times to beats, clip edges, the playhead, markers and the cues of
+/// the cue tracks within
 /// [tolerance] (the caller converts its pixel tolerance at the current zoom).
 class Snapper {
   final Duration tolerance;
@@ -44,6 +47,7 @@ class Snapper {
   final bool clipEdges;
   final bool playhead;
   final bool markers;
+  final bool cues;
 
   const Snapper({
     required this.tolerance,
@@ -51,6 +55,7 @@ class Snapper {
     this.clipEdges = true,
     this.playhead = true,
     this.markers = true,
+    this.cues = true,
   });
 
   /// The target nearest to [time] within [tolerance], or `null`.
@@ -62,6 +67,7 @@ class Snapper {
     Duration time, {
     Duration? playheadAt,
     Set<String> ignoreClipIds = const {},
+    Set<String> ignoreCueIds = const {},
   }) {
     SnapResult? best;
     var bestDistance = 0;
@@ -85,6 +91,13 @@ class Snapper {
     if (markers) {
       for (final marker in composition.markers) {
         consider(marker.at, SnapTargetKind.marker);
+      }
+    }
+    if (cues) {
+      for (final track in composition.cueTracks) {
+        for (final cue in track.cues) {
+          if (!ignoreCueIds.contains(cue.id)) consider(cue.at, SnapTargetKind.cue);
+        }
       }
     }
     final tempo = composition.tempo;

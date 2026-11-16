@@ -5,6 +5,7 @@ import '../model/audio_track.dart';
 import '../model/clip.dart';
 import '../model/clip_label.dart';
 import '../model/composition.dart';
+import '../model/cue_track.dart';
 import '../model/loop_range.dart';
 import '../model/macro_def.dart';
 import '../model/marker.dart';
@@ -234,6 +235,22 @@ extension CompositionEdits on Composition {
         if (!bound && audioBound == false) updated = updated.copyWith(removeAudioOrigin: true);
         return updated;
       });
+
+  /// Picks the cue track a generator or effect clip's cue triggers fire on
+  /// ([CompositionErrorKind.invalidValue] for a file clip,
+  /// [CompositionErrorKind.cueTrackNotFound] for an unknown track); `null`
+  /// follows the composition's first cue track. [audioBound] as in
+  /// [setGeneratorBindings] (a clip reading cues is anchored in time).
+  Composition setCueTrack(String clipId, String? cueTrackId, {bool? audioBound}) {
+    if (cueTrackId != null) _cueTrack(cueTrackId);
+    return _updateParametric(clipId, (source) {
+      var updated =
+          cueTrackId == null ? source.copyWith(removeCueTrackId: true) : source.copyWith(cueTrackId: cueTrackId);
+      if (audioBound == false) updated = updated.copyWith(removeAudioOrigin: true);
+      if (audioBound == true && updated.audioOrigin == null) updated = updated.copyWith(audioOrigin: Duration.zero);
+      return updated;
+    });
+  }
 
   /// Changes the seed of a generator or effect clip
   /// ([CompositionErrorKind.invalidValue] for a file clip).
@@ -793,6 +810,117 @@ extension CompositionEdits on Composition {
     ]);
   }
 
+  // ---------------------------------------------------------------- cue tracks
+
+  /// Adds a cue track at the end ([CompositionErrorKind.duplicateId] when
+  /// its id is used).
+  Composition addCueTrack(CueTrack track) {
+    if (cueTrackById(track.id) != null) {
+      throw CompositionException(CompositionErrorKind.duplicateId, 'Cue track id "${track.id}" is already used.');
+    }
+    return copyWith(cueTracks: [...cueTracks, track]);
+  }
+
+  /// Renames or recolors a cue track ([CompositionErrorKind.cueTrackNotFound]).
+  Composition updateCueTrack(String cueTrackId, {String? name, ClipLabel? color}) =>
+      _replaceCueTrack(_cueTrack(cueTrackId).copyWith(name: name, color: color));
+
+  /// Removes a cue track; clips that named it follow the first remaining
+  /// cue track ([CompositionErrorKind.cueTrackNotFound]).
+  Composition removeCueTrack(String cueTrackId) {
+    _cueTrack(cueTrackId);
+    Clip release(Clip clip) => switch (clip.source) {
+          final ParametricRef source when source.cueTrackId == cueTrackId =>
+            clip.copyWith(source: source.copyWith(removeCueTrackId: true)),
+          _ => clip,
+        };
+    return copyWith(
+      tracks: [
+        for (final track in tracks)
+          track.clips.any((clip) => !identical(release(clip), clip))
+              ? track.copyWith(clips: [for (final clip in track.clips) release(clip)])
+              : track,
+      ],
+      cueTracks: [
+        for (final other in cueTracks)
+          if (other.id != cueTrackId) other,
+      ],
+    );
+  }
+
+  /// Adds [cues] to a cue track in one step
+  /// ([CompositionErrorKind.duplicateId] for a used cue id).
+  Composition addCues(String cueTrackId, List<Cue> cues) {
+    final track = _cueTrack(cueTrackId);
+    final ids = {for (final cue in track.cues) cue.id};
+    for (final cue in cues) {
+      if (!ids.add(cue.id)) {
+        throw CompositionException(CompositionErrorKind.duplicateId, 'Cue id "${cue.id}" is already used.');
+      }
+    }
+    return _replaceCueTrack(track.copyWith(cues: [...track.cues, ...cues]));
+  }
+
+  /// Replaces all cues of a cue track ([CompositionErrorKind.duplicateId]
+  /// for repeated ids).
+  Composition replaceCues(String cueTrackId, List<Cue> cues) {
+    final track = _cueTrack(cueTrackId);
+    final ids = <String>{};
+    for (final cue in cues) {
+      if (!ids.add(cue.id)) {
+        throw CompositionException(CompositionErrorKind.duplicateId, 'Cue id "${cue.id}" is repeated.');
+      }
+    }
+    return _replaceCueTrack(track.copyWith(cues: cues));
+  }
+
+  /// Moves the cues [cueIds] by [delta] together; the delta is clamped so
+  /// that no cue goes before 0 ([CompositionErrorKind.cueNotFound] for an
+  /// unknown id).
+  Composition moveCues(String cueTrackId, Set<String> cueIds, Duration delta) {
+    final track = _cueTrack(cueTrackId);
+    final moved = _cues(track, cueIds);
+    var shift = delta;
+    for (final cue in moved) {
+      if (cue.at + shift < Duration.zero) shift = -cue.at;
+    }
+    if (shift == Duration.zero) return this;
+    return _replaceCueTrack(track.copyWith(cues: [
+      for (final cue in track.cues) cueIds.contains(cue.id) ? cue.copyWith(at: cue.at + shift) : cue,
+    ]));
+  }
+
+  /// Sets the strength (`0..1`) of the cues [cueIds]
+  /// ([CompositionErrorKind.invalidValue] outside the range,
+  /// [CompositionErrorKind.cueNotFound] for an unknown id).
+  Composition setCueStrength(String cueTrackId, Set<String> cueIds, double strength) {
+    final track = _cueTrack(cueTrackId);
+    _cues(track, cueIds);
+    return _replaceCueTrack(_guard(() => track.copyWith(cues: [
+          for (final cue in track.cues) cueIds.contains(cue.id) ? cue.copyWith(strength: strength) : cue,
+        ])));
+  }
+
+  /// Removes the cues [cueIds] ([CompositionErrorKind.cueNotFound] for an
+  /// unknown id).
+  Composition removeCues(String cueTrackId, Set<String> cueIds) {
+    final track = _cueTrack(cueTrackId);
+    _cues(track, cueIds);
+    return _replaceCueTrack(track.copyWith(cues: [
+      for (final cue in track.cues)
+        if (!cueIds.contains(cue.id)) cue,
+    ]));
+  }
+
+  Composition _replaceCueTrack(CueTrack track) =>
+      copyWith(cueTracks: [for (final other in cueTracks) other.id == track.id ? track : other]);
+
+  List<Cue> _cues(CueTrack track, Set<String> cueIds) => [
+        for (final id in cueIds)
+          track.cueById(id) ??
+              (throw CompositionException(CompositionErrorKind.cueNotFound, 'Cue "$id" not found in "${track.id}".')),
+      ];
+
   /// Sets or (with `null`) removes the music track; audio-bound generator
   /// clips are re-anchored to the new mapping (0 without a soundtrack).
   Composition setAudio(AudioTrack? audio) =>
@@ -1022,6 +1150,10 @@ extension CompositionEdits on Composition {
   Marker _marker(String markerId) =>
       markerById(markerId) ??
       (throw CompositionException(CompositionErrorKind.markerNotFound, 'Marker "$markerId" not found.'));
+
+  CueTrack _cueTrack(String cueTrackId) =>
+      cueTrackById(cueTrackId) ??
+      (throw CompositionException(CompositionErrorKind.cueTrackNotFound, 'Cue track "$cueTrackId" not found.'));
 
   MacroDef _macro(String macroId) =>
       macroById(macroId) ??
