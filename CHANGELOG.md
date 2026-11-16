@@ -1,3 +1,9 @@
+## 0.10.1
+
+- Depends on `icicles_generators` 0.8.0: `.icproj` documents round-trip the new drum triggers unchanged — the
+  Strobe `trigger` values `kick`/`snare`/`hihat`/`cymbals`/`drums`, `AudioReactivity` triggers `kick`/`snare`/
+  `hihat`/`drums` and the `drumHit` envelope trigger (all encoded by the generators package's JSON codecs).
+
 ## 0.10.0
 
 - Universal audio reactivity: `ParametricRef.reactivity: AudioReactivity` (`GeneratorRef` and `EffectRef`
