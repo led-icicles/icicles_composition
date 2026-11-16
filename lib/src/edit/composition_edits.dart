@@ -12,6 +12,7 @@ import '../model/marker.dart';
 import '../model/output_spec.dart';
 import '../model/region.dart';
 import '../model/source_ref.dart';
+import '../model/stage_layout.dart';
 import '../model/transition.dart';
 import '../model/transition_fitting.dart';
 import '../model/visual_track.dart';
@@ -763,6 +764,10 @@ extension CompositionEdits on Composition {
   /// Sets or (with `null`) removes the in/out points.
   Composition setLoopRange(LoopRange? range) =>
       range == null ? copyWith(removeLoopRange: true) : copyWith(loopRange: range);
+
+  /// Sets or (with `null`) removes the recorded preview layout.
+  Composition setStageLayout(StageLayout? layout) =>
+      layout == null ? copyWith(removeStageLayout: true) : copyWith(stageLayout: layout);
 
   Composition removeMarker(String markerId) {
     _marker(markerId);

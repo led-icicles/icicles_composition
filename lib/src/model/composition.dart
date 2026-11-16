@@ -11,6 +11,7 @@ import 'macro_def.dart';
 import 'marker.dart';
 import 'output_spec.dart';
 import 'source_ref.dart';
+import 'stage_layout.dart';
 import 'visual_track.dart';
 
 /// A clip together with the track holding it.
@@ -51,6 +52,11 @@ class Composition extends Equatable {
   /// display order.
   final List<CueTrack> cueTracks;
 
+  /// How the installation is arranged in the preview (the application's
+  /// panel layout), `null` when the project does not record one. Rendering
+  /// ignores it.
+  final StageLayout? stageLayout;
+
   /// Throws an [ArgumentError] for an unsupported [framerate], a name with
   /// the NUL character or repeated track, clip, marker, macro or cue track
   /// ids (clip ids are unique across tracks).
@@ -65,6 +71,7 @@ class Composition extends Equatable {
     this.loopRange,
     List<MacroDef> macros = const [],
     List<CueTrack> cueTracks = const [],
+    this.stageLayout,
   })  : tracks = List.unmodifiable(tracks),
         markers = List.unmodifiable(markers.sorted((a, b) => a.at.compareTo(b.at))),
         macros = List.unmodifiable(macros),
@@ -156,7 +163,7 @@ class Composition extends Equatable {
   bool isTrackAudible(VisualTrack track) => !track.muted && (!hasSolo || track.solo);
 
   /// A copy with the given fields replaced; [removeAudio], [removeTempo] and
-  /// [removeLoopRange] set them to `null`.
+  /// [removeLoopRange] and [removeStageLayout] set them to `null`.
   Composition copyWith({
     String? name,
     OutputSpec? target,
@@ -171,6 +178,8 @@ class Composition extends Equatable {
     bool removeLoopRange = false,
     List<MacroDef>? macros,
     List<CueTrack>? cueTracks,
+    StageLayout? stageLayout,
+    bool removeStageLayout = false,
   }) =>
       Composition(
         name: name ?? this.name,
@@ -183,8 +192,10 @@ class Composition extends Equatable {
         loopRange: removeLoopRange ? null : (loopRange ?? this.loopRange),
         macros: macros ?? this.macros,
         cueTracks: cueTracks ?? this.cueTracks,
+        stageLayout: removeStageLayout ? null : (stageLayout ?? this.stageLayout),
       );
 
   @override
-  List<Object?> get props => [name, target, framerate, tracks, audio, tempo, markers, loopRange, macros, cueTracks];
+  List<Object?> get props =>
+      [name, target, framerate, tracks, audio, tempo, markers, loopRange, macros, cueTracks, stageLayout];
 }

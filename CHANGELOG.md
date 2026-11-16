@@ -1,3 +1,11 @@
+## 0.12.0
+
+- Preview layout of a project: `StageLayout {name, grid?, panels}` of `StagePlacement {index, cx, cy, width, height,
+  rotation, shape}` (pure numbers; the grid at index 0, panels 1-based), `Composition.stageLayout` (`copyWith(stageLayout:,
+  removeStageLayout:)`, part of equality) and the edit `setStageLayout`. Rendering ignores it.
+- `.icproj` version 2: `"stageLayout": {name, grid?, panels: [{index, cx, cy, w, h, rot, shape}]}`; an unreadable
+  placement is dropped (`defaultedValue`), so that object keeps the application's default.
+
 ## 0.11.0
 
 - Cue tracks (timing tracks of user-placed marks that cue triggers fire on): `Cue {id, at, strength}`,

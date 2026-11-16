@@ -18,6 +18,7 @@ import '../model/output_spec.dart';
 import '../model/pixel_mask.dart';
 import '../model/region.dart';
 import '../model/source_ref.dart';
+import '../model/stage_layout.dart';
 import '../model/transition.dart';
 import '../model/transition_fitting.dart';
 import '../model/visual_track.dart';
@@ -153,7 +154,11 @@ class IcprojDecodeResult {
 ///   [ParamBindingJson] form), and the composition `"cueTracks"`: `[{"id",
 ///   "name", "color"?, "cues": {"ids": [], "us": [], "s": []}}]` (cue ids,
 ///   timeline microseconds and strengths, column-wise) with a generator or
-///   effect source naming its track in `"cueTrack"`. Any of them being set
+///   effect source naming its track in `"cueTrack"`, and the composition
+///   `"stageLayout": {"name", "grid"?, "panels": [...]}` (placements
+///   `{"index", "cx", "cy", "w", "h", "rot", "shape"}`, the grid at index 0;
+///   an unreadable placement is dropped, so that object keeps the
+///   application's default). Any of them being set
 ///   makes the document version 2; a document without them keeps its
 ///   version 1 bytes.
 /// - Decoding is strict about the format and version but salvages the rest:
@@ -185,6 +190,7 @@ abstract final class IcprojCodec {
     if (composition.audio case final audio? when !audio.isSingleWhole) return currentVersion;
     if (composition.macros.isNotEmpty) return currentVersion;
     if (composition.cueTracks.isNotEmpty) return currentVersion;
+    if (composition.stageLayout != null) return currentVersion;
     if (composition.tracks.any((track) => track.solo)) return currentVersion;
     if (composition.markers.any((marker) => marker.color != ClipLabel.none)) return currentVersion;
     final needsV2 = composition.placedClips.any((placed) {
@@ -257,6 +263,22 @@ abstract final class IcprojCodec {
                 },
               },
           ],
+        if (composition.stageLayout case final layout?)
+          'stageLayout': {
+            'name': layout.name,
+            if (layout.grid case final grid?) 'grid': _placementToJson(grid),
+            'panels': [for (final panel in layout.panels) _placementToJson(panel)],
+          },
+      };
+
+  static Map<String, Object?> _placementToJson(StagePlacement placement) => {
+        'index': placement.index,
+        'cx': placement.cx,
+        'cy': placement.cy,
+        'w': placement.width,
+        'h': placement.height,
+        'rot': placement.rotation,
+        'shape': placement.shape,
       };
 
   /// The version 1 shape `{path, gain, offsetUs}` for a plain soundtrack
@@ -692,6 +714,15 @@ class _Decoder {
       }
     }
 
+    StageLayout? stageLayout;
+    if (json['stageLayout'] != null) {
+      try {
+        stageLayout = _stageLayout(_Fields.of(json['stageLayout'], r'$.stageLayout', problems));
+      } on _Invalid catch (error) {
+        problems.add(IcprojProblem(IcprojProblemKind.defaultedValue, r'$.stageLayout', '${error.message} No layout.'));
+      }
+    }
+
     final composition = Composition(
       name: name,
       target: target,
@@ -703,8 +734,58 @@ class _Decoder {
       loopRange: loopRange,
       macros: macros,
       cueTracks: cueTracks,
+      stageLayout: stageLayout,
     );
     return IcprojDecodeResult(composition, problems);
+  }
+
+  /// A preview layout; an unreadable placement (or a repeated panel index)
+  /// is dropped one by one, leaving that object at its default.
+  StageLayout _stageLayout(_Fields fields) {
+    StagePlacement? placement(Object? value, String path, {required bool grid}) {
+      try {
+        final at = _Fields.of(value, path, problems);
+        final index = grid ? 0 : at.requiredInt('index');
+        if (index < 1 && !grid) throw _Invalid('$path.index is below 1.');
+        double required(String key) {
+          final number = at.json[key];
+          if (number is! num || !number.isFinite) throw _Invalid('$path.$key is missing or not a number.');
+          return number.toDouble();
+        }
+
+        final width = required('w');
+        final height = required('h');
+        if (width <= 0 || height <= 0) throw _Invalid('$path has no positive size.');
+        final shape = at.string('shape', 'rect');
+        return StagePlacement(
+          index: index,
+          cx: required('cx'),
+          cy: required('cy'),
+          width: width,
+          height: height,
+          rotation: grid ? 0 : at.number('rot', 0, min: -1e9, max: 1e9),
+          shape: shape.isEmpty ? 'rect' : shape,
+        );
+      } on _Invalid catch (error) {
+        problems.add(IcprojProblem(IcprojProblemKind.defaultedValue, path, '${error.message} The default is used.'));
+        return null;
+      }
+    }
+
+    final grid = fields.json['grid'] == null ? null : placement(fields.json['grid'], '${fields.path}.grid', grid: true);
+    final panels = <StagePlacement>[];
+    final seen = <int>{};
+    for (final (index, value) in fields.list('panels').indexed) {
+      final path = '${fields.path}.panels[$index]';
+      final panel = placement(value, path, grid: false);
+      if (panel == null) continue;
+      if (!seen.add(panel.index)) {
+        problems.add(IcprojProblem(IcprojProblemKind.defaultedValue, path, 'Repeated panel ${panel.index} dropped.'));
+        continue;
+      }
+      panels.add(panel);
+    }
+    return StageLayout(name: fields.string('name', ''), grid: grid, panels: panels);
   }
 
   /// A cue track; unreadable cues (a missing or negative time, a strength
