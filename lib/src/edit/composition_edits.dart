@@ -1118,6 +1118,17 @@ extension CompositionEdits on Composition {
   /// Sets or (with `null`) removes the beat grid.
   Composition setTempo(Tempo? tempo) => tempo == null ? copyWith(removeTempo: true) : copyWith(tempo: tempo);
 
+  /// Sets the instant whose frame is the show's cover, or (with `null`)
+  /// leaves the choice automatic. Throws a [CompositionException]
+  /// (`invalidValue`) for a negative time.
+  Composition setCoverAt(Duration? at) {
+    if (at == null) return copyWith(removeCoverAt: true);
+    if (at.isNegative) {
+      throw const CompositionException(CompositionErrorKind.invalidValue, 'The cover time is negative.');
+    }
+    return copyWith(coverAt: at);
+  }
+
   /// What the show checks allow.
   Composition setFlashLimit(FlashLimit limit) => copyWith(flashLimit: limit);
 

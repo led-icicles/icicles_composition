@@ -1,3 +1,9 @@
+## 0.15.0
+
+- `Composition.coverAt` (the timeline instant whose frame is the show's cover; `null` = picked automatically) with
+  the edit `setCoverAt`. Written as `coverAtUs`, omitted when `null` (v1 documents stay byte-identical); a set
+  value forces v2; an unreadable one is salvaged with `defaultedValue`. Rendering ignores it.
+
 ## 0.14.0
 
 - Depends on `icicles_generators` v0.11.0 (meter in `Tempo`); the `.icproj` `tempo` carries `beatsPerBar`, omitted

@@ -54,6 +54,25 @@ void main() {
       expect(firstTrack(jsonOf(variants['solo']!))['solo'], true);
     });
 
+    test('the cover time is omitted when automatic, forces version 2 when set and is salvaged', () {
+      expect(jsonOf(plain()).keys, isNot(contains('coverAtUs')));
+      final withCover = plain().setCoverAt(ms(1500));
+      expect(IcprojCodec.versionFor(withCover), 2);
+      expect(jsonOf(withCover)['coverAtUs'], 1500000);
+      expect(IcprojCodec.decode(IcprojCodec.encode(withCover)).composition, withCover);
+      expect(withCover.setCoverAt(null), plain());
+      expect(
+        () => plain().setCoverAt(ms(-1)),
+        throwsA(isA<CompositionException>().having((e) => e.kind, 'kind', CompositionErrorKind.invalidValue)),
+      );
+
+      final json = jsonOf(withCover)..['coverAtUs'] = 'soon';
+      final result = IcprojCodec.fromJson(json);
+      expect(result.composition.coverAt, isNull);
+      expect(result.problems.single.path, r'$.coverAtUs');
+      expect(result.problems.single.kind, IcprojProblemKind.defaultedValue);
+    });
+
     test('an uncolored marker is written without a color', () {
       final json = jsonOf(plain().addMarker(Marker(id: 'm', at: s(1))));
       expect(json['version'], 1);

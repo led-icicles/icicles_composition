@@ -194,6 +194,7 @@ abstract final class IcprojCodec {
     if (composition.macros.isNotEmpty) return currentVersion;
     if (composition.cueTracks.isNotEmpty) return currentVersion;
     if (composition.stageLayout != null) return currentVersion;
+    if (composition.coverAt != null) return currentVersion;
     if (composition.flashLimit != FlashLimit.standard) return currentVersion;
     if (composition.sectionSource != SectionSource.auto) return currentVersion;
     if (composition.physical != null) return currentVersion;
@@ -247,6 +248,7 @@ abstract final class IcprojCodec {
         ],
         if (composition.loopRange case final range?)
           'loopRange': {'startUs': range.start.inMicroseconds, 'endUs': range.end.inMicroseconds},
+        if (composition.coverAt case final at?) 'coverAtUs': at.inMicroseconds,
         if (composition.macros.isNotEmpty)
           'macros': [
             for (final macro in composition.macros)
@@ -707,6 +709,15 @@ class _Decoder {
       }
     }
 
+    Duration? coverAt;
+    final coverAtUs = json['coverAtUs'];
+    if (coverAtUs is int && coverAtUs >= 0) {
+      coverAt = Duration(microseconds: coverAtUs);
+    } else if (coverAtUs != null) {
+      problems.add(IcprojProblem(
+          IcprojProblemKind.defaultedValue, r'$.coverAtUs', '"$coverAtUs" is not a time, the cover is automatic.'));
+    }
+
     final macros = <MacroDef>[];
     final macroIds = <String>{};
     for (final (index, value) in root.list('macros').indexed) {
@@ -774,6 +785,7 @@ class _Decoder {
       macros: macros,
       cueTracks: cueTracks,
       stageLayout: stageLayout,
+      coverAt: coverAt,
       flashLimit: flashLimit,
       sectionSource: sectionSource,
       physical: physical,
